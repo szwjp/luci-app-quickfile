@@ -1,0 +1,35 @@
+name: Debug Scan
+
+on:
+  workflow_dispatch:
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download SDK
+        run: |
+          ver=$(curl -sL https://downloads.openwrt.org/releases/ | grep -oE '24\.10\.[0-9]+' | sort -Vu | tail -1)
+          echo "SDK version: $ver"
+          dir="https://downloads.openwrt.org/releases/$ver/targets/x86/64/"
+          file=$(curl -sL "$dir" | grep -oE 'openwrt-sdk-[^"]+Linux-x86_64\.tar\.xz' | head -1)
+          echo "SDK file: $file"
+          curl -sLO "${dir}${file}"
+          tar xf "$file"
+          mv openwrt-sdk-* sdk
+
+      - name: Scan feed
+        run: |
+          cd sdk
+          echo "src-link packages_ci $GITHUB_WORKSPACE" >> feeds.conf.default
+          ./scripts/feeds update packages_ci luci
+          echo "=== packages_ci.index Package entries ==="
+          grep "^Package:" feeds/packages_ci.index || echo "(none)"
+          echo "=== luci.index i18n count (control) ==="
+          grep -c "^Package: luci-i18n" feeds/luci.index || true
+          echo "=== DUMP luci-app-quickfile ==="
+          make -C feeds/packages_ci/luci-app-quickfile DUMP=1 2>&1 | grep -E "^Package:|Error|error:" || echo "(no package lines)"
+          echo "=== po dir listing ==="
+          ls -la "$GITHUB_WORKSPACE/luci-app-quickfile/po/"
