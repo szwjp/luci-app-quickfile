@@ -18,7 +18,7 @@ jobs:
           echo "SDK file: $file"
           curl -sLO "${dir}${file}"
           tar xf "$file"
-          mv openwrt-sdk-* sdk
+          mv openwrt-sdk-*/ sdk
 
       - name: Scan feed
         run: |
