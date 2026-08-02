@@ -1,61 +1,120 @@
-name: Build Packages
+name: Build packages for QuickFile
 
 on:
-  push:
-    tags:
-      - "*"
   workflow_dispatch:
+
+  push:
+    branches:
+      - 'main'
+    paths:
+      - 'quickfile/**'
+      - 'luci-app-quickfile/**'
+      - '.github/**'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-pkg
+  cancel-in-progress: true
 
 jobs:
   build:
-    name: Build x86_64 / OpenWrt ${{ matrix.version }}
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        version:
-          - "24.10"
-          - "25.12"
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout source tree
+        uses: actions/checkout@v6
 
-      - name: Download OpenWrt SDK
-        run: |
-          ver=$(curl -sL https://downloads.openwrt.org/releases/ | grep -oE '${{ matrix.version }}\.[0-9]+' | sort -Vu | tail -1)
-          echo "SDK version: $ver"
-          dir="https://downloads.openwrt.org/releases/$ver/targets/x86/64/"
-          file=$(curl -sL "$dir" | grep -oE 'openwrt-sdk-[^"]+Linux-x86_64\.tar\.(zst|xz)' | head -1)
-          echo "SDK file: $file"
-          curl -sLO "${dir}${file}"
-          tar xf "$file"
-          mv openwrt-sdk-*/ sdk
-
-      - name: Compile packages
-        run: |
-          cd sdk
-          sed -e 's,https://git.openwrt.org/feed/,https://github.com/openwrt/,' \
-              -e 's,https://git.openwrt.org/openwrt/,https://github.com/openwrt/,' \
-              -e 's,https://git.openwrt.org/project/,https://github.com/openwrt/,' \
-              feeds.conf.default > feeds.conf
-          echo "src-link packages_ci $GITHUB_WORKSPACE" >> feeds.conf
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
-          echo "CONFIG_PACKAGE_luci-app-quickfile=m" >> .config
-          echo "CONFIG_PACKAGE_luci-i18n-quickfile-zh-cn=m" >> .config
-          if [ "${{ matrix.version }}" = "25.12" ]; then
-            echo "CONFIG_USE_APK=y" >> .config
-          fi
-          make defconfig
-          make -j"$(nproc)" package/feeds/packages_ci/luci-app-quickfile/compile V=s
-
-      - name: Upload packages to release
-        uses: ncipollo/release-action@v1
+      - name: Checkout apk
+        uses: actions/checkout@v6
         with:
-          tag: x86_64-openwrt-${{ matrix.version }}
-          name: x86_64-openwrt-${{ matrix.version }}
-          token: ${{ secrets.GITHUB_TOKEN }}
-          allowUpdates: true
-          replacesArtifacts: true
-          prerelease: false
-          artifacts: "sdk/bin/packages/x86_64/packages_ci/*.ipk,sdk/bin/packages/x86_64/packages_ci/*.apk"
+          repository: 'alpinelinux/apk-tools'
+          path: 'apk-tools'
+          fetch-depth: 0
+          ref: 'b5a31c0d865342ad80be10d68f1bb3d3ad9b0866'
+
+      - name: Checkout po2lmo
+        uses: actions/checkout@v6
+        with:
+          repository: 'openwrt/luci'
+          path: 'po2lmo'
+          sparse-checkout: 'modules/luci-base/src'
+
+      - name: Setup dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo -E rm -rf /var/lib/man-db/auto-update
+          sudo -E apt-get update -qq
+          sudo -E apt-get install -y build-essential curl fakeroot libssl-dev lua5.1 meson ninja-build
+
+          pushd apk-tools
+          meson setup build \
+            -Db_lto=true \
+            -Dcompressed-help=false \
+            -Ddocs=disabled \
+            -Dhelp=enabled \
+            -Dlua_version=5.1 \
+            -Ddefault_library=static \
+            -Durl_backend=wget \
+            -Dzstd=false \
+            -Dpython=disabled \
+            -Dtests=disabled \
+            -Dcrypto_backend=openssl
+          ninja -C build
+          sudo -E meson install -C build --strip
+          popd
+
+          pushd po2lmo/modules/luci-base/src
+          make po2lmo
+          sudo -E install -m0755 -s po2lmo /usr/local/bin/po2lmo
+          popd
+
+          curl -fLO "https://raw.githubusercontent.com/openwrt/openwrt/master/scripts/ipkg-build"
+          sudo install -m0755 ipkg-build /usr/local/bin/ipkg-build
+
+      - name: Build package files
+        run: |
+          pushd .github
+          fakeroot bash build-pkg.sh apk
+          fakeroot bash build-pkg.sh ipk
+          popd
+
+      - name: Publishing packages to GitHub Artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: quickfile-packages
+          path: .github/*.{apk,ipk}
+
+      - name: Cleanup old release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RELEASE_ID=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/luci-app-quickfile" | jq -r '.id') || true
+          if [ "$RELEASE_ID" != "null" ] && [ -n "$RELEASE_ID" ]; then
+            ASSETS=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID/assets" | jq -r '.[].id')
+            for asset_id in $ASSETS; do
+              curl -fsS -X DELETE -H "Authorization: Bearer $GH_TOKEN" \
+                "https://api.github.com/repos/${{ github.repository }}/releases/assets/$asset_id" || true
+            done
+          fi
+
+      - name: Publish to Latest Build Release
+        uses: softprops/action-gh-release@v2.2.1
+        with:
+          tag_name: luci-app-quickfile
+          name: QuickFile Latest Build
+          body: |
+            Automatically built on ${{ github.run_id }}.
+            Commit: ${{ github.sha }}
+          files: |
+            .github/quickfile_*.apk
+            .github/quickfile_*.ipk
+            .github/luci-app-quickfile_*.apk
+            .github/luci-app-quickfile_*.ipk
+            .github/luci-i18n-quickfile-*.apk
+            .github/luci-i18n-quickfile-*.ipk
+          token: ${{ github.token }}
