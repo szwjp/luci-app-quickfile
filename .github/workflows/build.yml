@@ -8,45 +8,54 @@ on:
 
 jobs:
   build:
-    name: Build ${{ matrix.arch }}-${{ matrix.tag }}
+    name: Build x86_64 / OpenWrt ${{ matrix.version }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        arch:
-          - x86_64
-        tag:
-          - openwrt-24.10
-          - openwrt-25.12
+        version:
+          - "24.10"
+          - "25.12"
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Set up ARCH
+      - name: Download OpenWrt SDK
         run: |
-          echo "EFFECTIVE_ARCH=${{ matrix.arch }}" >> $GITHUB_ENV
-          echo "ARCH=${{ matrix.arch }}-${{ matrix.tag }}" >> $GITHUB_ENV
+          ver=$(curl -sL https://downloads.openwrt.org/releases/ | grep -oE '${{ matrix.version }}\.[0-9]+' | sort -Vu | tail -1)
+          echo "SDK version: $ver"
+          dir="https://downloads.openwrt.org/releases/$ver/targets/x86/64/"
+          file=$(curl -sL "$dir" | grep -oE 'openwrt-sdk-[^"]+Linux-x86_64\.tar\.(zst|xz)' | head -1)
+          echo "SDK file: $file"
+          curl -sLO "${dir}${file}"
+          tar xf "$file"
+          mv openwrt-sdk-*/ sdk
 
-      - name: Build Packages
-        uses: sbwml/openwrt-gh-action-sdk@go1.26
-        env:
-          FEEDNAME: packages_ci
-          PACKAGES: luci-app-quickfile
-          NO_REFRESH_CHECK: true
-
-      - name: Create compress files
+      - name: Compile packages
         run: |
-          tar -zcvf "$ARCH.tar.gz" -C "bin/packages/$EFFECTIVE_ARCH/" packages_ci
+          cd sdk
+          sed -e 's,https://git.openwrt.org/feed/,https://github.com/openwrt/,' \
+              -e 's,https://git.openwrt.org/openwrt/,https://github.com/openwrt/,' \
+              -e 's,https://git.openwrt.org/project/,https://github.com/openwrt/,' \
+              feeds.conf.default > feeds.conf
+          echo "src-link packages_ci $GITHUB_WORKSPACE" >> feeds.conf
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+          echo "CONFIG_PACKAGE_luci-app-quickfile=m" >> .config
+          echo "CONFIG_PACKAGE_luci-i18n-quickfile-zh-cn=m" >> .config
+          if [ "${{ matrix.version }}" = "25.12" ]; then
+            echo "CONFIG_USE_APK=y" >> .config
+          fi
+          make defconfig
+          make -j"$(nproc)" package/feeds/packages_ci/luci-app-quickfile/compile V=s
 
-      - name: Upload packages
+      - name: Upload packages to release
         uses: ncipollo/release-action@v1
         with:
-          tag: ${{ env.ARCH }}.tar.gz
-          name: ${{ env.ARCH }}.tar.gz
+          tag: x86_64-openwrt-${{ matrix.version }}
+          name: x86_64-openwrt-${{ matrix.version }}
           token: ${{ secrets.GITHUB_TOKEN }}
           allowUpdates: true
           replacesArtifacts: true
           prerelease: false
-          artifacts: "${{ env.ARCH }}.tar.gz"
+          artifacts: "sdk/bin/packages/x86_64/packages_ci/*.ipk,sdk/bin/packages/x86_64/packages_ci/*.apk"
