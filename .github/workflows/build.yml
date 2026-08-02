@@ -1,0 +1,69 @@
+name: Build Packages
+
+on:
+  push:
+    tags:
+      - "*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build ${{ matrix.arch }}-${{ matrix.tag }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - aarch64_cortex-a53
+          - aarch64_cortex-a72
+          - aarch64_cortex-a76
+          - aarch64_generic
+          - arm_arm1176jzf-s_vfp
+          - arm_arm926ej-s
+          - arm_cortex-a15_neon-vfpv4
+          - arm_cortex-a5_vfpv4
+          - arm_cortex-a7
+          - arm_cortex-a7_neon-vfpv4
+          - arm_cortex-a7_vfpv4
+          - arm_cortex-a8_vfpv3
+          - arm_cortex-a9
+          - arm_cortex-a9_neon
+          - arm_cortex-a9_vfpv3-d16
+          - arm_fa526
+          - arm_xscale
+          - x86_64
+        tag:
+          - openwrt-24.10
+          - openwrt-25.12
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up ARCH
+        run: |
+          echo "EFFECTIVE_ARCH=${{ matrix.arch }}" >> $GITHUB_ENV
+          echo "ARCH=${{ matrix.arch }}-${{ matrix.tag }}" >> $GITHUB_ENV
+
+      - name: Build Packages
+        uses: sbwml/openwrt-gh-action-sdk@go1.26
+        env:
+          FEEDNAME: packages_ci
+          PACKAGES: luci-app-quickfile luci-i18n-quickfile-zh-cn
+          NO_REFRESH_CHECK: true
+
+      - name: Create compress files
+        run: |
+          tar -zcvf "$ARCH.tar.gz" -C "bin/packages/$EFFECTIVE_ARCH/" packages_ci
+
+      - name: Upload packages
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ env.ARCH }}.tar.gz
+          name: ${{ env.ARCH }}.tar.gz
+          token: ${{ secrets.GITHUB_TOKEN }}
+          allowUpdates: true
+          replacesArtifacts: true
+          prerelease: false
+          artifacts: "${{ env.ARCH }}.tar.gz"
