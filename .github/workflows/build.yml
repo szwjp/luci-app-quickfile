@@ -85,7 +85,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: quickfile-packages
-          path: .github/*.{apk,ipk}
+          path: |
+            .github/*.apk
+            .github/*.ipk
 
       - name: Cleanup old release assets
         env:
