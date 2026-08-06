@@ -88,6 +88,7 @@ jobs:
           path: |
             .github/*.apk
             .github/*.ipk
+          include-hidden-files: true
 
       - name: Cleanup old release assets
         env:
