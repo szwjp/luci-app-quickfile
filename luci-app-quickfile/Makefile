@@ -2,6 +2,8 @@
 
 include $(TOPDIR)/rules.mk
 
+PKG_NAME:=luci-app-quickfile
+
 LUCI_TITLE:=LuCI File Manager module
 LUCI_DEPENDS:=+luci-nginx +quickfile
 

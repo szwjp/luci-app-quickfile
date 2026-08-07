@@ -125,13 +125,9 @@ function build_apk() {
 		--info "depends:$depends" \
 		"${script_args[@]}" \
 		--files "$pkg_dir" \
-		--output "$TEMP_DIR/${name}_${version}.apk"
+		--output "$TEMP_DIR/${name}-${version}.apk"
 
-	local file_arch="$arch"
-	if [ "$arch" == "noarch" ]; then
-		file_arch="all"
-	fi
-	mv "$TEMP_DIR/${name}_${version}.apk" "$BASE_DIR/${name}_${version}_${file_arch}.apk"
+	mv "$TEMP_DIR/${name}-${version}.apk" "$BASE_DIR/${name}-${version}.apk"
 }
 
 function build_ipk() {
@@ -175,7 +171,7 @@ default_prerm $0 $@' > "$pkg_dir/CONTROL/prerm"
 	fi
 
 	ipkg-build -m "" "$pkg_dir" "$TEMP_DIR"
-	mv "$TEMP_DIR/${name}_${version}_${arch}.ipk" "$BASE_DIR/"
+	mv "$TEMP_DIR/${name}_${version}_${arch}.ipk" "$BASE_DIR/${name}-${version}.ipk"
 }
 
 ### Build

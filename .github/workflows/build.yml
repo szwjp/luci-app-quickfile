@@ -114,10 +114,10 @@ jobs:
             Automatically built on ${{ github.run_id }}.
             Commit: ${{ github.sha }}
           files: |
-            .github/quickfile_*.apk
-            .github/quickfile_*.ipk
-            .github/luci-app-quickfile_*.apk
-            .github/luci-app-quickfile_*.ipk
+            .github/quickfile-*.apk
+            .github/quickfile-*.ipk
+            .github/luci-app-quickfile-*.apk
+            .github/luci-app-quickfile-*.ipk
             .github/luci-i18n-quickfile-*.apk
             .github/luci-i18n-quickfile-*.ipk
           token: ${{ github.token }}
