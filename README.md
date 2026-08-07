@@ -1,22 +1,6 @@
 # luci-app-quickfile
 
-`luci-app-quickfile` 是一款专为 OpenWrt 设计的轻量级网页端文件管理器。
-
----
-
-## 如何编译
-
-```sh
-git clone https://github.com/sbwml/luci-app-quickfile package/quickfile
-make menuconfig # choose LUCI -> Applications -> luci-app-quickfile
-make package/quickfile/luci-app-quickfile/compile V=s
-```
-
-注意：由于 quickfile 直接使用 OpenWrt 令牌进行登录验证，它需要依赖 `nginx` 配合使用，这可能会让你的 LuCI 失去工作。
-
-*⚠ 非开发人员不建议自行编译使用*
-
----
+`luci-app-quickfile` 是一款专为 OpenWrt 设计的轻量级网页端文件管理器。由于 quickfile 直接使用 OpenWrt 令牌进行登录验证，它需要依赖 `nginx` 配合使用，这可能会让你的 LuCI 失去工作。
 
 ## 相关设置
 
@@ -60,11 +44,7 @@ https://github.com/sbwml/luci-app-quickfile/blob/5d863b91bc1d555dea65ecce6e30786
 
 ### 命令终端
 - 实时命令行：内置网页终端功能，支持直接在管理界面中执行当前目录系统命令，便于用户进行快速批量操作文件、调试与系统维护。
-- 快捷键：
-  
-  复制：`Crtl + Shift + C`
-  
-  粘贴：`Crtl + Shift + V`
+- 快捷键：  复制：`Crtl + Shift + C`.      粘贴：`Crtl + Shift + V`
 
 ### 软件包安装 (IPK / APK)
 - 直接安装：支持在网页端直接执行本地上传的 `.ipk` 或 `.apk` 软件包安装。
@@ -77,8 +57,3 @@ https://github.com/sbwml/luci-app-quickfile/blob/5d863b91bc1d555dea65ecce6e30786
 ### 文本编辑器
 - Monaco 核心：集成轻量化 Monaco Editor 文本编辑器。
 - 代码高亮：支持多种配置文件及脚本语言的语法高亮显示，方便用户直接在线编辑和调整路由器配置。
-
----
-
-<img width="1665" height="1120" alt="image" src="https://github.com/user-attachments/assets/9ec35b5f-b4a8-4e2d-a9fa-9d3ed21a0fb4" />
-
