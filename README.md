@@ -22,6 +22,21 @@ uci commit nginx
 service nginx restart
 ```
 
+ - **HTTPS 兼容（LuCI 保持 HTTPS）**
+
+`quickfile` 会反向请求 `{host}/cgi-bin/luci` 校验 LuCI 会话，`{host}` 来自 `quickfile.locations` 里的 rewrite：`host=$scheme://$http_host`。因此 https 下能否工作，取决于这个回环请求所用的地址/证书：
+
+1. **用你证书所覆盖的域名访问**（例如证书是 `wjp-family.top`，就用 `https://wjp-family.top`）。回环请求 `POST https://wjp-family.top/cgi-bin/luci` 的证书会通过校验——这是推荐姿势。注意该域名需能被路由器自身解析回本机（DNS 回环 / hairpin NAT），否则回环请求到不了 LuCI。
+2. **用 IP（如 `https://192.168.1.1`）访问时**，必须让证书同时覆盖该 IP（把 IP 加进证书 SAN）。Let's Encrypt 通常不签发 IP SAN，此时需用自签/私有 CA 证书同时覆盖域名与 IP 并在浏览器中信任；否则 quickfile 内部回环校验会因证书与 IP 不匹配而失败，报 `Session verification failed: tls: ... no alternative certificate subject name`，与上游 issue #4 相同。
+3. **`-insecure` 参数在 quickfile v1.0.25 中不存在**（已实测当前最新版二进制与仓库打包的二进制均无此 flag），因此无法用跳过 TLS 校验的方式兜底；IP 访问需靠上述证书覆盖来解决。
+4. 若 LuCI 走的是**非标 HTTPS 端口**，本仓库已把 rewrite 的 `$host` 改为 `$http_host` 以保留端口，避免回环校验打到默认 443。
+
+<details>
+<summary>提醒：反代/CDN 场景</summary>
+
+- 若域名套了 Cloudflare/CDN 等反代，quickfile 的内部回环校验请求（到 `{host}/cgi-bin/luci`）可能到达的是反代而非路由器，此时需让该请求绕过反代，或改用其它方案。
+</details>
+
  - **文件上传大小受限**
 
 通过编辑 `/etc/nginx/conf.d/quickfile.locations` 文件并修改 `client_body_temp_path` 临时目录为大容量目录可避免文件上传大小受限而失败。
