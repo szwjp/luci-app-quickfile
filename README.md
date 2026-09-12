@@ -66,6 +66,11 @@ quickfile 复用 luci-nginx 已有的 LAN 服务器（`nginx._lan`，HTTPS 443�
 - LAN 侧 80 端口（`nginx._redirect2ssl`）完全没有改动；8199 只在环回可达（实测从 LAN IP 访问是连不上）。
 - 该 vhost 内联了 uwsgi 参数，因此即使 `/etc/nginx/uwsgi_params` 不存在也不会让 `nginx -t` 失败；`include conf.d/*.conf` 是 stock `uci.conf.template` 自带的，本包不需要再改 include 列表。
 - 如果 8199 与你机器上的其他服务冲突，改 `quickfile-auth.conf` 的 `listen` 与 `quickfile.locations` 里两处 `host=` 即可（两处必须一致）。
+- `quickfile-auth.conf` 与 `quickfile.locations` 由同一个包安装、必须同时存在：前者提供 `map $quickfile_cookie`，后者引用它。
+
+### 会话 cookie 的名字
+
+ucode 版 LuCI 按协议给会话 cookie 命名（`/usr/share/ucode/luci/dispatcher.uc`：`cookie_name = HTTPS == 'on' ? 'sysauth_https' : 'sysauth_http'`），而 quickfile 后端只查找 `sysauth_http`。所以 HTTPS 下浏览器带的是 `sysauth_https`，后端会直接返回 `invalid session`（这也是旧版本"只能在 http 下才可用"的原因）。`quickfile-auth.conf` 里的 `map` 只在这一个代理跳上把 `sysauth_https=` 改写成 `sysauth_http=`（其余 cookie 原样保留），LuCI 自己收到的仍是原名，因此两边都不受影响。
 
 ### 实际能怎么访问
 

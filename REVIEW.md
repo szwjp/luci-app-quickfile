@@ -329,3 +329,28 @@ A.1 里"轻微 3（证书）"我当时的处理是**删掉自签证书生成、�
 **尚未完成的一步**：无法在没有 root 密码的前提下产生"有效浏览器会话"，因此"回连返回 200 → 应用完全可用"的最后一步需要管理员在浏览器里登录确认。设备上已装好本仓库工作区版本的 `quickfile.locations` + `quickfile-auth.conf`。
 
 **回归**：新增 `quickfile-auth.conf` 后，`build-pkg.sh` 的包内文件清单断言、证书用例（34 条）与原有 nginx 用例（26 条）共 108 条断言全部通过。
+
+### A.6.1 第三堵墙：HTTPS 下会话 cookie 叫 `sysauth_https`（2026-09-12）
+
+管理员在浏览器实测后报 `invalid session`（而非之前的 x509/401）。该字符串对应 `auth.go` 里 **`r.Cookie("sysauth_http")` 取不到 cookie** 的分支。设备上确认了原因：
+
+```
+/usr/share/ucode/luci/dispatcher.uc:963
+let cookie_name = (http.getenv('HTTPS') == 'on') ? 'sysauth_https' : 'sysauth_http'
+http.header('Set-Cookie', `${cookie_name}=${session.sid}; path=...; SameSite=strict; HttpOnly${cookie_secure}`);
+```
+
+即 ucode 版 LuCI 在 HTTPS 下把会话 cookie 命名为 `sysauth_https`，而 quickfile 后端只查找 `sysauth_http`。**这也解释了原作者为什么要把应用放到 http 上（只有 http 下 cookie 才叫 `sysauth_http`）**；我之前把它改回 https-only，等于同时抽掉了这一环。
+
+修法：在 `quickfile-auth.conf`（http 上下文）里加 `map $http_cookie $quickfile_cookie`，只在这一个代理跳把 `sysauth_https=`（以及 `sysauth=`）改写成 `sysauth_http=`，其余 cookie 原样保留；`quickfile.locations` 的 API location 用 `proxy_set_header Cookie $quickfile_cookie`。LuCI 侧（浏览器 → uwsgi）不受影响。注意 `map` 的取值不支持位置捕获，必须用命名捕获（否则 `nginx -t` 报 `unknown "1" variable`）。
+
+真机验证（同上设备，ACME 证书、`restrict_locally` 不变）：
+
+| 请求携带的 cookie | 后端返回 |
+|---|---|
+| 无 | `{"error":"invalid session"}`（= 管理员看到的症状） |
+| `sysauth_https=<sid>` | `{"error":"Invalid or expired session token."}` → cookie 已被识别，回连到达 LuCI |
+| `sysauth_http=<sid>` | 同上（向后兼容） |
+| `foo=1; sysauth_https=<sid>; bar=2` | 同上（不破坏其他 cookie） |
+
+`nginx -t` successful。此后仍待管理员在浏览器里最终确认（有效会话应为 200 → 界面可用）。

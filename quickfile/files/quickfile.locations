@@ -29,6 +29,10 @@ location /cgi-bin/luci/quickfile {
 	proxy_set_header Connection "upgrade";
 	proxy_set_header X-Real-IP $remote_addr;
 	proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+	# LuCI names the session cookie sysauth_https on an HTTPS connection while
+	# the backend only looks for sysauth_http; the map in quickfile-auth.conf
+	# renames it for this proxy hop only.
+	proxy_set_header Cookie $quickfile_cookie;
 	# The backend builds its LuCI session-check URL from this argument, so it is
 	# pinned to the loopback vhost from quickfile-auth.conf instead of the
 	# address the browser used: the check then stays independent of the
