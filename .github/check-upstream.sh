@@ -5,7 +5,7 @@
 # than the PKG_VERSION pinned in luci-app-quickfile/Makefile, and track it in
 # exactly one GitHub issue. Detection only: this never modifies the repository
 # and never publishes anything. Adopting a new version stays a reviewed manual
-# change (see README, "构建与校验").
+# change (see docs/build.md).
 #
 # r2 exposes no bucket listing, so newer versions are found by probing version
 # candidates: the next patches, the next minor and the next major. Missing a

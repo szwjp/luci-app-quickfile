@@ -3,7 +3,7 @@ name: Check upstream quickfile
 # Detection only, no repository mutation: probe r2.cooluc.com for a quickfile
 # release newer than the PKG_VERSION pinned in the Makefiles and track it in a
 # single GitHub issue. Adopting a version stays a reviewed manual change; see
-# .github/check-upstream.sh and README "构建与校验".
+# .github/check-upstream.sh and docs/build.md.
 on:
   schedule:
     - cron: '17 2 * * *' # 02:17 UTC = 10:17 Asia/Shanghai
