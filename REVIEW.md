@@ -354,3 +354,13 @@ http.header('Set-Cookie', `${cookie_name}=${session.sid}; path=...; SameSite=str
 | `foo=1; sysauth_https=<sid>; bar=2` | 同上（不破坏其他 cookie） |
 
 `nginx -t` successful。此后仍待管理员在浏览器里最终确认（有效会话应为 200 → 界面可用）。
+
+**A.6.2 最终确认（2026-09-12，管理员浏览器实测）**
+
+按 `v1.0.25-r3` 的 release 包在主路由上**全新安装**（`apk del` 掉本地构建的 r99 → `apk add --allow-untrusted` 三个 r3 apk）后，管理员确认：
+
+- `https://<lan-ip>/` 访问 quickfile：正常（`_lan` 用的是 ACME 域名证书，按 IP 访问仍有证书告警，但功能正常）
+- `https://<域名>/` 访问 quickfile：正常（证书匹配，无告警）
+- `http://<lan-ip>/`：自动 301 跳转到 https（stock 行为，本包不改）
+
+至此 P1 的目标达成：**全新安装后 https + LAN IP 与 https + 域名都可用，http 仍按 stock 行为跳转**。安装过程中 post-install 正确拒绝接管管理员的 ACME 证书并打印提示，`uci export nginx` 在卸载+安装前后逐字节一致；环回鉴权 vhost 与 cookie 名重写是让这套组合成立的两个关键点。设备上保留的是 release 产物（`1.0.25-r3`），不再有手工拷贝的文件。

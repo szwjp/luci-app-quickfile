@@ -145,4 +145,5 @@ uci import < /root/backup/nginx-uci-<时间戳>.txt
 
 - 未提供非 root 的 ACL，菜单只对 root 可见。
 - 后端以 `-dir /` 运行且带命令终端，权限等同 root。请自行确认 `_lan` 仍然限制来源网段：stock 模板会在 `_lan` 的 include 里放 `restrict_locally`（只允许回环与私网地址），本包不会改动它，但如果你手工删过这个 include，`443` 上就是全放开。
-- 验证状态：apk 路径（x86_64）已在 ImmortalWrt 25.12.1 上实测；ipk/opkg 路径由同一个打包脚本产出、CI 只校验其 control 字段，未在 opkg 真机上实测。
+- 验证状态：apk 路径（x86_64）已在 ImmortalWrt 25.12.1 上**全新安装**实测通过——`https://<lan-ip>/`（管理员自己的 ACME 证书场景）、`https://<域名>/`、以及 `http://<lan-ip>/` 自动 301 到 https 均正常；ipk/opkg 路径由同一个打包脚本产出、CI 只校验其 control 字段，未在 opkg 真机上实测。
+- `_lan` 使用管理员自己的证书（ACME 等）时，按 IP 访问仍会看到证书告警（域名证书不覆盖 IP），这是证书本身的性质，功能不受影响。
