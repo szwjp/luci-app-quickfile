@@ -167,6 +167,7 @@ mkdir -p "$QF_DIR/usr/bin" "$QF_DIR/etc/init.d" "$QF_DIR/etc/nginx/conf.d" \
 install -m0755 "$BINARY" "$QF_DIR/usr/bin/quickfile"
 install -m0755 "$REPO_DIR/quickfile/files/quickfile.init" "$QF_DIR/etc/init.d/quickfile"
 install -m0644 "$REPO_DIR/quickfile/files/quickfile.locations" "$QF_DIR/etc/nginx/conf.d/quickfile.locations"
+install -m0644 "$REPO_DIR/quickfile/files/quickfile-auth.conf" "$QF_DIR/etc/nginx/conf.d/quickfile-auth.conf"
 install -m0644 "$REPO_DIR/quickfile/LICENSE" "$QF_DIR/usr/share/licenses/quickfile/LICENSE"
 install -m0644 "$REPO_DIR/quickfile/NOTICE" "$QF_DIR/usr/share/licenses/quickfile/NOTICE"
 
@@ -224,8 +225,10 @@ cat > "$TEMP_DIR/app-pre-deinstall" <<'PRERM'
 . ${IPKG_INSTROOT}/lib/functions.sh
 export root="${IPKG_INSTROOT}"
 export pkgname="luci-app-quickfile"
-# Nothing to undo: the package only ensures that conf.d/*.locations is
-# included, which is stock behaviour shared with other packages.
+# Hand the certificate back to nginx-util and drop ours, so nothing keeps
+# pointing at files this package no longer provides.
+[ -f /usr/lib/quickfile/configure-nginx.sh ] && . /usr/lib/quickfile/configure-nginx.sh
+[ -n "${IPKG_INSTROOT}" ] || cleanup_nginx_quickfile
 default_prerm $0 $@
 PRERM
 
@@ -303,6 +306,8 @@ POSTINST
 #!/bin/sh
 [ -s ${IPKG_INSTROOT}/lib/functions.sh ] || exit 0
 . ${IPKG_INSTROOT}/lib/functions.sh
+[ -f /usr/lib/quickfile/configure-nginx.sh ] && . /usr/lib/quickfile/configure-nginx.sh
+[ -n "${IPKG_INSTROOT}" ] || cleanup_nginx_quickfile
 default_prerm $0 $@
 PRERM
 		chmod 0755 "$pkg_dir/CONTROL/prerm"
@@ -316,14 +321,14 @@ PRERM
 
 if [ "$PKG_MGR" == "apk" ]; then
 	build_apk "$APP_DIR" "luci-app-quickfile" "$PKGVER" "$NOARCH_APK" \
-		"LuCI File Manager module" "libc luci-nginx quickfile" "yes"
+		"LuCI File Manager module" "libc luci-nginx quickfile openssl-util" "yes"
 	build_apk "$I18N_DIR" "luci-i18n-quickfile-zh-cn" "$PKGVER" "$NOARCH_APK" \
 		"QuickFile - Chinese translation" "luci-app-quickfile" "no"
 	build_apk "$QF_DIR" "quickfile" "$PKGVER" "$ARCH" \
 		"Lightweight web-based file manager for OpenWrt" "libc" "no"
 else
 	build_ipk "$APP_DIR" "luci-app-quickfile" "$PKGVER" "$NOARCH_IPK" "luci" \
-		"LuCI File Manager module" "libc, luci-nginx, quickfile" "yes"
+		"LuCI File Manager module" "libc, luci-nginx, quickfile, openssl-util" "yes"
 	build_ipk "$I18N_DIR" "luci-i18n-quickfile-zh-cn" "$PKGVER" "$NOARCH_IPK" "luci" \
 		"QuickFile - Chinese translation" "luci-app-quickfile" "no"
 	build_ipk "$QF_DIR" "quickfile" "$PKGVER" "$ARCH" "net" \

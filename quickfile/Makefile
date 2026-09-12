@@ -9,7 +9,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=quickfile
 PKG_VERSION:=1.0.25
-PKG_RELEASE:=2
+PKG_RELEASE:=3
 
 # Upstream multi-arch tarball (x86_64 + aarch64 + arm binaries). Only the
 # x86_64 binary is packaged by this repository; see README.
@@ -64,6 +64,7 @@ define Package/quickfile/install
 	$(INSTALL_DIR) $(1)/etc/init.d $(1)/etc/nginx/conf.d
 	$(INSTALL_BIN) $(CURDIR)/files/quickfile.init $(1)/etc/init.d/quickfile
 	$(INSTALL_CONF) $(CURDIR)/files/quickfile.locations $(1)/etc/nginx/conf.d/quickfile.locations
+	$(INSTALL_CONF) $(CURDIR)/files/quickfile-auth.conf $(1)/etc/nginx/conf.d/quickfile-auth.conf
 	$(INSTALL_DIR) $(1)/usr/share/licenses/quickfile
 	$(INSTALL_DATA) $(CURDIR)/LICENSE $(1)/usr/share/licenses/quickfile/LICENSE
 	$(INSTALL_DATA) $(CURDIR)/NOTICE $(1)/usr/share/licenses/quickfile/NOTICE

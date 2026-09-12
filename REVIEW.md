@@ -301,3 +301,31 @@ apk 侧 `apk mkpkg` 未加 `--sign`（`build-pkg.sh:222-233`），OpenWrt 官方
 - **因此本附录 A.1–A.4 中出现的 SHA（`425aeae`、`90efdca`、`7271eec`、`92ef565`、`5942afe` 等）与 Actions 运行编号都属于旧历史，在本仓库中已不存在**；那些提交所做的文件改动已经全部包含在当前这个根提交里。
 - 重置前的远端仓库（含 tag/release `v1.0.25-r1`、46 条 Actions 运行记录）整体删除后按同名新建，故旧的 release 资产与运行日志也不再可用。
 
+
+## A.6 补充修复：全新安装下 HTTPS + LAN IP 无法使用（2026-09-12，P1）
+
+A.1 里"轻微 3（证书）"我当时的处理是**删掉自签证书生成、完全不碰证书**，理由是测试机上用的是 ACME 正式证书、不能覆盖。事后发现这个决定留下一个更严重的后果：**全新安装（stock luci-nginx）时该应用根本用不了**。启动本轮修复的原始问题：
+
+**症状与成因（真机实测）**
+
+1. 后端校验会话的方式是 `POST <host>/cgi-bin/luci`（带 `sysauth_http` cookie），`<host>` 由 nginx 传给它，且它用 `&http.Client{}` **默认校验 TLS**（源码 `internal/api/auth.go`）。
+2. stock nginx-util 生成的自签证书 **subject 只有 `CN=OpenWrt`、连 SAN 扩展都没有**（实测 `subjectAltName` 0 条）；Go 1.15+ 只认 SAN、不再回退 CN → 按 IP 访问时必然 `x509: cannot validate certificate for <ip> because it doesn't contain any IP SANs` → 所有 API 500。
+3. 80 端口是 stock `_redirect2ssl` 的 302 跳转，本包有意不动 → `http://` 也不会直接服务应用。
+   ⇒ 结论：**全新安装后 http 和 https+LAN IP 都不能正常使用**，这是上游"回连校验"设计与 stock 证书的必然组合，上游原包没有 postinst，同样如此。
+
+**修复（两步，第二歩才是关键）**
+
+1. 恢复"带 IP SAN 的自签证书"并加守卫：仅当 `_lan` 用的是 nginx-util 自签证书（`uci_manage_ssl=self-signed`，或证书 subject 为 `CN=OpenWrt`）时接管；管理员自己的证书（ACME 等）**完全不碰**，只打印提示。证书 SAN 覆盖 `IP:<lan-ip>`、`IP:127.0.0.1`、`DNS:<主机名>`，用 nginx-util 官方机制 `uci_manage_ssl=quickfile` 指向它，3650 天，LAN IP 变化重签；卸载时交还给 nginx-util 并删除自家证书。
+2. **把回连固定到环回明文**：`quickfile.locations` 改为传 `host=http://127.0.0.1:8199`，新增 `quickfile-auth.conf`（仅 `listen 127.0.0.1:8199` / `[::1]:8199`）只服务 `POST /cgi-bin/luci`，其余路径 301；uwsgi 参数内联以避免依赖 `/etc/nginx/uwsgi_params`。这样会话校验不再依赖证书、DNS 与访问规则，cookie 不出本机，也不再受 Host 头影响。
+
+**真机验证（ImmortalWrt 25.12.1 / x86_64，生产配置为 ACME 证书 + `restrict_locally`）**
+
+- 修复前：按 IP 调 API 返回 `Session verification failed: ... x509 ...`；按域名则因回连源地址是公网 IP 被 `restrict_locally` 拒（403）。
+- 修复后：按 IP 与按域名调 API 都返回 `{"error":"Invalid or expired session token."}`——即回连已经到达 LuCI，只剩"测试会话没有 ACL"这一层（我用 `ubus session create` 造的是无 ACL 会话；有效浏览器会话时应为 200）。
+- 环回 vhost：`POST http://127.0.0.1:8199/cgi-bin/luci` 返回 403（到达 LuCI，非 301/000）；从 LAN IP 访问 8199 返回连接失败（仅环回）✓。
+- 未受影响：`http://` 仍 301、`https://…/quickfile` 与静态资源 200、`nginx -t` successful、`restrict_locally` 与 ACME 证书逐字节保持。
+- 过程中发现并修掉两个真 bug：`detect_lan_ip` 直接使用 `network.lan.ipaddr`，而真机该值是 CIDR 写法 `192.168.1.1/24` → SAN 变成 `IP:192.168.1.1/24` 被 openssl 拒绝（现已去掉前缀并校验 IPv4 形态）；`generate_cert` 原先吞掉 openssl 的 stderr，现已保留为可诊断输出。
+
+**尚未完成的一步**：无法在没有 root 密码的前提下产生"有效浏览器会话"，因此"回连返回 200 → 应用完全可用"的最后一步需要管理员在浏览器里登录确认。设备上已装好本仓库工作区版本的 `quickfile.locations` + `quickfile-auth.conf`。
+
+**回归**：新增 `quickfile-auth.conf` 后，`build-pkg.sh` 的包内文件清单断言、证书用例（34 条）与原有 nginx 用例（26 条）共 108 条断言全部通过。
