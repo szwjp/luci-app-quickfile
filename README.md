@@ -79,6 +79,21 @@ fakeroot bash .github/build-pkg.sh ipk
 
 产物在 `dist/`。所有对外部工具/脚本的依赖都在 workflow 里固定到 commit，`ipkg-build` 还额外固定 SHA-256。
 
+### 上游版本探测与跟版
+
+本仓库**不会自动跟随上游**：`PKG_VERSION` 是人工 pin 的，构建只编这个版本、只用 `vendor/quickfile/` 里的那个二进制，并强制与 r2 上的同名包比对（见上面的第 2、3 步）。
+
+为了知道上游什么时候发了新版，`.github/workflows/check-upstream.yml` 每天（02:17 UTC / 10:17 Asia/Shanghai）跑一次 `.github/check-upstream.sh`：发现 r2 上有比 `PKG_VERSION` 新的版本时，开一个带 `upstream-update` 标签的 issue（正文含新包 sha256，可直接填 `PKG_HASH`，以及下面的跟版步骤）；同一版本不会重复开；跟版合并并发布后，下一次探测会自动关闭它。**只做检测，不改仓库、不发布**。也可手动触发（Actions → Check upstream quickfile），支持 `dry_run`（只打印计划）与 `pinned_override`（诊断用，假装 pin 在某个版本）。
+
+跟版是人工步骤，缺任何一步都会在构建的校验阶段明确失败：
+
+1. 下载上游 `quickfile-<新版本>.tar.gz`，取出其中的 `quickfile-<新版本>/quickfile.x86_64`，重新打包成 `vendor/quickfile/quickfile-<新版本>-x86_64.tar.gz`；
+2. 刷新 `vendor/quickfile/SHA256SUMS`；
+3. 两个 Makefile 的 `PKG_VERSION` 都改成新版本，`quickfile/Makefile` 的 `PKG_HASH` 改成新包的 sha256，`PKG_RELEASE` 重置为 1；
+4. 提交后手动触发 Build workflow。
+
+两个已知边界：r2 不提供目录列举，探测按"后续 patch、下一个 minor、下一个 major"逐个 HEAD，非常规版本号可能漏报（漏报的后果只是没有通知）；另外如果 pin 的版本被上游下架且没有更新的版本可报，探测任务会**失败**（提示发布构建也会失败），而不是静默通过。
+
 ## 升级与回滚
 
 - 从旧版本升级：新版本的 post-install 会自动修复旧版本对 `/etc/config/nginx` 的改动，无需手工干预。

@@ -1,0 +1,49 @@
+name: Check upstream quickfile
+
+# Detection only, no repository mutation: probe r2.cooluc.com for a quickfile
+# release newer than the PKG_VERSION pinned in the Makefiles and track it in a
+# single GitHub issue. Adopting a version stays a reviewed manual change; see
+# .github/check-upstream.sh and README "构建与校验".
+on:
+  schedule:
+    - cron: '17 2 * * *' # 02:17 UTC = 10:17 Asia/Shanghai
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Only report what would happen; do not create or change issues'
+        type: boolean
+        default: false
+      pinned_override:
+        description: 'Diagnostics: pretend this is the pinned PKG_VERSION (exercises the notification path)'
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: check-upstream
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_BASE: https://r2.cooluc.com/source
+  LABEL: upstream-update
+
+jobs:
+  check:
+    name: Probe upstream & track the newest version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source tree
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 1
+
+      - name: Check upstream versions
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
+          PINNED: ${{ inputs.pinned_override }}
+        run: bash .github/check-upstream.sh
