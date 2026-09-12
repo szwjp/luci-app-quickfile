@@ -1,0 +1,6 @@
+# Vendored upstream binary (prebuilt quickfile tarball, x86_64 only).
+# Kept in the repo so the build input is versioned and auditable; git-lfs holds
+# the blob. When bumping PKG_VERSION, replace the file here, refresh
+# vendor/quickfile/SHA256SUMS, and update PKG_VERSION (both Makefiles) plus
+# PKG_HASH (quickfile/Makefile). .github/build-pkg.sh verifies all three.
+vendor/quickfile/*.tar.gz filter=lfs diff=lfs merge=lfs -text

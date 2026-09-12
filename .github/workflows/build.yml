@@ -1,0 +1,213 @@
+name: Build
+
+# Manual release build for the single supported architecture (x86_64).
+# Version comes from luci-app-quickfile/Makefile (PKG_VERSION/PKG_RELEASE).
+# Triggering the same version again rebuilds it and overwrites the assets of
+# that release.
+on:
+  workflow_dispatch:
+
+# Manual triggers may be fired back to back; queue instead of cancelling so a
+# release is never left half-updated.
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  # Pinned tool versions. Everything executed by this workflow is pinned to a
+  # commit and, where it is a script rather than an action, to its SHA-256.
+  APK_TOOLS_REF: b5a31c0d865342ad80be10d68f1bb3d3ad9b0866
+  LUCI_REF: 289a7260434d4b8212a9cc6cf6160cb1935270c1
+  OPENWRT_REF: f0d3e332e5f839508f77fba8c7420ceeb079ab86
+  IPKG_BUILD_SHA256: 5a85d59b6656074015bc20add788993143f7b51f371f977b5286af9ed5f22f5b
+
+jobs:
+  build:
+    name: Build x86_64 packages & publish release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source tree
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          # Full history: build-pkg.sh derives SOURCE_DATE_EPOCH from the last
+          # commit that changed packaged files, so docs/CI-only commits do not
+          # change the artifacts. Needs the complete history to find it.
+          fetch-depth: 0
+          lfs: true
+
+      - name: Parse Makefile version
+        id: version
+        run: |
+          set -o pipefail
+          PKG_VERSION=$(sed -n 's/^PKG_VERSION:=//p' luci-app-quickfile/Makefile | head -n1 | tr -d '[:space:]')
+          PKG_RELEASE=$(sed -n 's/^PKG_RELEASE:=//p' luci-app-quickfile/Makefile | head -n1 | tr -d '[:space:]')
+          [ -n "$PKG_VERSION" ] && [ -n "$PKG_RELEASE" ]
+          # apk uses -r<N>, ipk (opkg) uses -<N>; the release tag follows apk.
+          {
+            echo "version=${PKG_VERSION}-r${PKG_RELEASE}"
+            echo "ipk_version=${PKG_VERSION}-${PKG_RELEASE}"
+            echo "tag=v${PKG_VERSION}-r${PKG_RELEASE}"
+          } >> "$GITHUB_OUTPUT"
+          echo "::notice::Building v${PKG_VERSION}-r${PKG_RELEASE} for x86_64"
+
+      - name: Checkout apk-tools
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          repository: alpinelinux/apk-tools
+          path: apk-tools
+          ref: ${{ env.APK_TOOLS_REF }}
+          fetch-depth: 1
+
+      - name: Checkout po2lmo
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          repository: openwrt/luci
+          path: po2lmo
+          ref: ${{ env.LUCI_REF }}
+          sparse-checkout: modules/luci-base/src
+          fetch-depth: 1
+
+      - name: Install build dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -o pipefail
+          sudo -E apt-get update -qq
+          sudo -E apt-get install -y build-essential curl fakeroot libssl-dev lua5.1 meson ninja-build
+
+          pushd apk-tools
+          meson setup build \
+            -Db_lto=true \
+            -Dcompressed-help=false \
+            -Ddocs=disabled \
+            -Dhelp=enabled \
+            -Dlua_version=5.1 \
+            -Ddefault_library=static \
+            -Durl_backend=wget \
+            -Dzstd=false \
+            -Dpython=disabled \
+            -Dtests=disabled \
+            -Dcrypto_backend=openssl
+          ninja -C build
+          sudo -E meson install -C build --strip
+          popd
+
+          pushd po2lmo/modules/luci-base/src
+          make po2lmo
+          sudo -E install -m0755 -s po2lmo /usr/local/bin/po2lmo
+          popd
+
+      # openwrt/openwrt's ipkg-build writes the outer .ipk container and fills
+      # in Installed-Size, so it is fetched at a pinned commit and verified
+      # before being installed as root.
+      - name: Install pinned ipkg-build
+        run: |
+          set -o pipefail
+          curl -fsSL -o /tmp/ipkg-build \
+            "https://raw.githubusercontent.com/openwrt/openwrt/${OPENWRT_REF}/scripts/ipkg-build"
+          echo "${IPKG_BUILD_SHA256}  /tmp/ipkg-build" | sha256sum -c -
+          sudo install -m0755 /tmp/ipkg-build /usr/local/bin/ipkg-build
+
+      - name: Build packages (apk + ipk)
+        run: |
+          set -o pipefail
+          fakeroot bash .github/build-pkg.sh apk
+          fakeroot bash .github/build-pkg.sh ipk
+
+      # Guards the two classes of packaging bugs that are invisible in a log:
+      # architecture independent packages must carry the apk spelling "noarch"
+      # (not ipk's "all") and the backend must carry "x86_64".
+      - name: Verify package metadata
+        run: |
+          set -o pipefail
+          set -- dist/*.apk
+          [ "$#" -eq 3 ] || { echo "::error::expected 3 apk files, got $#"; exit 1; }
+          set -- dist/*.ipk
+          [ "$#" -eq 3 ] || { echo "::error::expected 3 ipk files, got $#"; exit 1; }
+
+          for pkg in dist/*.apk; do
+            echo "--- $pkg"
+            apk adbdump "$pkg"
+            case "$(basename "$pkg")" in
+              quickfile-*) apk adbdump "$pkg" | grep -q 'x86_64' ;;
+              *) apk adbdump "$pkg" | grep -q 'noarch' ;;
+            esac
+          done
+
+          for pkg in dist/*.ipk; do
+            echo "--- $pkg"
+            # The outer ipk container is a gzipped tar whose members are named
+            # ./debian-binary, ./data.tar.gz, ./control.tar.gz, so extract all
+            # of them instead of naming one.
+            rm -rf check
+            mkdir -p check
+            tar -xzf "$pkg" -C check
+            tar -xzf check/control.tar.gz -C check ./control
+            cat check/control
+            grep -q '^Version: ' check/control
+            grep -q '^License: Apache-2.0$' check/control
+            grep -q '^Installed-Size: [0-9]' check/control
+            case "$(basename "$pkg")" in
+              quickfile_*)
+                grep -q '^Architecture: x86_64$' check/control
+                grep -q '^Depends: libc$' check/control
+                ;;
+              *)
+                grep -q '^Architecture: all$' check/control
+                ;;
+            esac
+          done
+
+      - name: Prepare release notes
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+          IPK_VERSION: ${{ steps.version.outputs.ipk_version }}
+        run: |
+          set -o pipefail
+          {
+            echo "x86_64 专用构建，包含 apk 与 ipk。其他架构不在本仓库的出包范围内。"
+            echo
+            echo "## 安装（OpenWrt / ImmortalWrt，x86_64）"
+            echo
+            echo '```sh'
+            echo "# apk (OpenWrt main / ImmortalWrt 25.x 等使用 apk 的系统)"
+            echo "apk add --allow-untrusted quickfile-${VERSION}.apk"
+            echo "apk add --allow-untrusted luci-app-quickfile-${VERSION}.apk"
+            echo "apk add --allow-untrusted luci-i18n-quickfile-zh-cn-${VERSION}.apk   # 可选"
+            echo
+            echo "# opkg (仍使用 opkg 的系统)"
+            echo "opkg install quickfile_${IPK_VERSION}_x86_64.ipk"
+            echo "opkg install luci-app-quickfile_${IPK_VERSION}_all.ipk"
+            echo "opkg install luci-i18n-quickfile-zh-cn_${IPK_VERSION}_all.ipk   # 可选"
+            echo '```'
+            echo
+            echo "包未签名，apk 需要 \`--allow-untrusted\`；安装后 LuCI 菜单在 **系统 → Quick File Manager**，"
+            echo "界面通过 luci-nginx 已有的 HTTPS 入口访问，本包不会改动证书、监听端口或 http→https 跳转。"
+            echo
+            echo "后端二进制取自上游 Apache-2.0 源码项目（https://git.cooluc.com/sbwml/quickfile），"
+            echo "许可证与来源说明随包安装在 \`/usr/share/licenses/quickfile/\`。"
+            echo
+            echo "## SHA-256"
+            echo
+            echo '```'
+            sha256sum dist/*.apk dist/*.ipk
+            echo '```'
+          } > dist/release-notes.md
+          cat dist/release-notes.md
+
+      - name: Publish release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
+          body_path: dist/release-notes.md
+          files: |
+            dist/*.apk
+            dist/*.ipk
+          # Re-triggering the same version replaces that release's assets.
+          overwrite_files: true
+          token: ${{ github.token }}

@@ -1,0 +1,43 @@
+# Included into the luci-nginx LAN server (see /etc/config/nginx: the "_lan"
+# server lists "conf.d/*.locations"). Quickfile is therefore reachable over the
+# same HTTPS endpoint as LuCI; this package does not add listeners, does not
+# touch ssl_certificate and does not change the http -> https redirect.
+
+# Uploads are streamed to the backend instead of being buffered on disk:
+# OpenWrt's nginx buffers request bodies in client_body_temp_path
+# (/var/lib/nginx/body, on the root filesystem) once they exceed
+# client_body_buffer_size, which a large upload would fill up. The unlimited
+# body size is scoped to the quickfile location only, so the rest of the web
+# UI keeps the stock 128M limit from uci.conf.template.
+# If you prefer disk buffering, set client_body_temp_path to a large volume in
+# the http block (e.g. /mnt/quickfile_tmp) and drop proxy_request_buffering.
+
+location /cgi-bin/luci/quickfile {
+	client_max_body_size 0;
+	client_body_buffer_size 128k;
+	proxy_cache off;
+	proxy_redirect off;
+	proxy_buffering off;
+	proxy_request_buffering off;
+	proxy_http_version 1.1;
+	proxy_connect_timeout 300;
+	proxy_read_timeout 300;
+	proxy_send_timeout 300;
+	proxy_set_header Host $host;
+	proxy_set_header Upgrade $http_upgrade;
+	proxy_set_header Connection "upgrade";
+	proxy_set_header X-Real-IP $remote_addr;
+	proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+	# nginx appends the original query string after the new arguments, so API
+	# parameters survive the rewrite.
+	rewrite ^/cgi-bin/luci/quickfile/api/(.*) /api/$1?host=$scheme://$host break;
+	proxy_pass http://unix:/tmp/run/quickfile/quickfile.sock;
+}
+
+location /cgi-bin/luci/quickfile-static/ {
+	proxy_set_header Host $host;
+	proxy_set_header X-Real-IP $remote_addr;
+	proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+	rewrite ^/cgi-bin/luci/quickfile-static/(.*) /static/$1?host=$scheme://$host break;
+	proxy_pass http://unix:/tmp/run/quickfile/quickfile.sock;
+}

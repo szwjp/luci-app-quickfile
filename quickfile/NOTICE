@@ -1,0 +1,15 @@
+quickfile
+=========
+
+The quickfile HTTP backend installed as /usr/bin/quickfile is a prebuilt
+binary redistributed from the upstream project. The packages built from this
+repository contain that binary unchanged.
+
+  upstream source: https://git.cooluc.com/sbwml/quickfile
+  source mirror:   https://github.com/sbwml/luci-app-quickfile (branch v1.0.24-src)
+  binary version:  1.0.25
+  license:         Apache License 2.0 (see LICENSE in this directory)
+
+Upstream ships no NOTICE file, so none is reproduced here. The binary is
+taken verbatim from the upstream release tarball, whose SHA-256 is recorded as
+PKG_HASH in Makefile and verified by .github/build-pkg.sh on every build.

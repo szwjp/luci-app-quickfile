@@ -1,0 +1,11 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: luci-app-quickfile\n"
+"Language: zh_Hans\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: luci-app-quickfile/root/usr/share/luci/menu.d/luci-app-quickfile.json:3
+msgid "Quick File Manager"
+msgstr "文件管理"
