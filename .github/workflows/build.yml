@@ -101,17 +101,24 @@ jobs:
           cargo --version
 
       - name: Download and verify upstream source
+        id: download
         env:
           SOURCE_NAME: ${{ steps.meta.outputs.source_name }}
           SOURCE_URL: ${{ steps.meta.outputs.source_url }}
           SOURCE_SHA256: ${{ steps.meta.outputs.source_sha256 }}
         run: |
-          set -o pipefail
+          set -euo pipefail
           mkdir -p /tmp/src
           curl -fsSL --retry 3 --max-time 600 -o "/tmp/src/${SOURCE_NAME}" "${SOURCE_URL}/${SOURCE_NAME}"
           echo "${SOURCE_SHA256}  /tmp/src/${SOURCE_NAME}" | sha256sum -c -
           tar xf "/tmp/src/${SOURCE_NAME}" -C /tmp/src
-          ls -d /tmp/src/*/
+          # The tarball's top directory is named after the archive without its
+          # suffix. Derive it instead of globbing: the glob would match the
+          # archive itself as well and "cd" would then fail with two arguments.
+          SRC_DIR="/tmp/src/${SOURCE_NAME%.tar.xz}"
+          [ -d "$SRC_DIR" ] || { echo "::error::expected $SRC_DIR to exist after extraction"; exit 1; }
+          echo "src_dir=${SRC_DIR}" >> "$GITHUB_OUTPUT"
+          echo "::notice::source extracted to ${SRC_DIR}"
 
       # Upstream declares xz2 with default-features = false, which disables
       # nothing: xz2 has no default features, so lzma-sys is built without its
@@ -120,23 +127,27 @@ jobs:
       # the backend ends up statically linked.
       - name: Bundle the xz decompressor
         run: |
-          set -o pipefail
-          cd /tmp/src/quickfile-src-*
-          grep -q 'xz2 = { version = "0.1", default-features = false }' Cargo.toml || {
+          set -euo pipefail
+          cd "${{ steps.download.outputs.src_dir }}"
+          if ! grep -qE '^xz2 = \{ version = "0\.1", default-features = false \}$' Cargo.toml; then
             echo "::error::upstream Cargo.toml no longer contains the expected xz2 dependency line; review the static build patch"
+            grep -n 'xz2' Cargo.toml || true
             exit 1
-          }
-          sed -i 's|xz2 = { version = "0.1", default-features = false }|xz2 = { version = "0.1", features = ["static"] }|' Cargo.toml
-          grep -q 'xz2 = { version = "0.1", features = \["static"\] }' Cargo.toml || {
+          fi
+          # -i.bak works with both GNU and BSD sed; the backup is removed right after.
+          sed -i.bak -E 's|^xz2 = \{ version = "0\.1", default-features = false \}$|xz2 = { version = "0.1", features = ["static"] }|' Cargo.toml
+          rm -f Cargo.toml.bak
+          if ! grep -qE '^xz2 = \{ version = "0\.1", features = \["static"\] \}$' Cargo.toml; then
             echo "::error::the xz2 static feature patch did not apply"
+            grep -n 'xz2' Cargo.toml || true
             exit 1
-          }
+          fi
           grep -n 'xz2' Cargo.toml
 
       - name: Build backend
         run: |
-          set -o pipefail
-          cd /tmp/src/quickfile-src-*
+          set -euo pipefail
+          cd "${{ steps.download.outputs.src_dir }}"
           cargo build --release --locked --target "${RUST_TARGET}"
           mkdir -p /tmp/out
           cp "target/${RUST_TARGET}/release/quickfile" /tmp/out/quickfile
