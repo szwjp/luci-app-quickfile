@@ -209,6 +209,48 @@ export pkgname="luci-app-quickfile"
 default_prerm $0 $@
 PRERM
 
+### Maintainer scripts for the quickfile backend package
+
+# The backend ships an init script. Without a post-install script apk never
+# enables or starts it, so a fresh install would leave the service down and
+# every request for the backend would fail.
+cat > "$TEMP_DIR/qf-post-install" <<'POSTINST'
+#!/bin/sh
+[ "${IPKG_NO_SCRIPT}" = "1" ] && exit 0
+[ -s ${IPKG_INSTROOT}/lib/functions.sh ] || exit 0
+. ${IPKG_INSTROOT}/lib/functions.sh
+export root="${IPKG_INSTROOT}"
+export pkgname="quickfile"
+
+# default_postinst enables and starts every /etc/init.d script this package
+# ships, which is /etc/init.d/quickfile.
+default_postinst $0 $@
+exit 0
+POSTINST
+
+# On removal the service has to stop, the runtime socket has to go and nginx
+# has to stop routing to it. The location file belongs to this package, but
+# nginx only drops the location on a reload, so the teardown does both.
+cat > "$TEMP_DIR/qf-pre-deinstall" <<'PRERM'
+#!/bin/sh
+[ -s ${IPKG_INSTROOT}/lib/functions.sh ] || exit 0
+. ${IPKG_INSTROOT}/lib/functions.sh
+export root="${IPKG_INSTROOT}"
+export pkgname="quickfile"
+
+[ -n "${IPKG_INSTROOT}" ] || {
+	# Stop the backend first, so nothing is left listening on the socket.
+	[ -x /etc/init.d/quickfile ] && /etc/init.d/quickfile stop >/dev/null 2>&1
+	rm -rf /tmp/run/quickfile
+	# Remove the location and reload nginx, otherwise the running server
+	# keeps proxying to a backend that no longer exists.
+	rm -f /etc/nginx/conf.d/quickfile.locations
+	[ -x /etc/init.d/nginx ] && /etc/init.d/nginx reload >/dev/null 2>&1
+}
+default_prerm $0 $@
+exit 0
+PRERM
+
 ### Packaging helper
 
 function build_apk() { # <pkg_dir> <name> <version> <arch> <desc> <depends> <scripts>
@@ -218,10 +260,13 @@ function build_apk() { # <pkg_dir> <name> <version> <arch> <desc> <depends> <scr
 	find "$pkg_dir" -type f,l -printf '/%P\n' | sort > "$pkg_dir/lib/apk/packages/$name.list"
 
 	local script_args=()
-	if [ "$scripts" == "yes" ]; then
+	if [ "$scripts" == "luci" ]; then
 		script_args+=(--script "post-install:$TEMP_DIR/app-post-install")
 		script_args+=(--script "post-upgrade:$TEMP_DIR/app-post-upgrade")
 		script_args+=(--script "pre-deinstall:$TEMP_DIR/app-pre-deinstall")
+	elif [ "$scripts" == "backend" ]; then
+		script_args+=(--script "post-install:$TEMP_DIR/qf-post-install")
+		script_args+=(--script "pre-deinstall:$TEMP_DIR/qf-pre-deinstall")
 	fi
 
 	apk mkpkg \
@@ -242,11 +287,11 @@ function build_apk() { # <pkg_dir> <name> <version> <arch> <desc> <depends> <scr
 ### Build
 
 build_apk "$APP_DIR" "luci-app-quickfile" "$PKGVER" "$NOARCH_APK" \
-	"LuCI File Manager module" "libc luci-nginx quickfile" "yes"
+	"LuCI File Manager module" "libc luci-nginx quickfile" "luci"
 build_apk "$I18N_DIR" "luci-i18n-quickfile-zh-cn" "$PKGVER" "$NOARCH_APK" \
 	"QuickFile - Chinese translation" "luci-app-quickfile" "no"
 build_apk "$QF_DIR" "quickfile" "$PKGVER" "$ARCH" \
-	"Lightweight web-based file manager for OpenWrt" "libc" "no"
+	"Lightweight web-based file manager for OpenWrt" "libc" "backend"
 
 echo "Artifacts in $OUT_DIR:"
 ls -l "$OUT_DIR"

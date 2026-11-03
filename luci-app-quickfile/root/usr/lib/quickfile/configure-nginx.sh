@@ -86,7 +86,14 @@ configure_nginx_quickfile() {
 	_restore_redirect2ssl
 
 	after="$(uci export nginx 2>/dev/null)"
-	[ "$before" = "$after" ] && return 0
+	if [ "$before" = "$after" ]; then
+		# The UCI configuration is already correct, but this package has just
+		# installed /etc/nginx/conf.d/quickfile.locations. nginx only reads
+		# that file on a reload: without one the running server does not know
+		# the location and answers 404 to every request for the backend.
+		_qf_reload_nginx ''
+		return $?
+	fi
 
 	# Only a run that actually changes something leaves a rollback file.
 	local backup=''
@@ -104,19 +111,31 @@ configure_nginx_quickfile() {
 	uci -q commit nginx 2>/dev/null || true
 	echo "quickfile: nginx configuration updated (backup: ${backup:-none})" >&2
 
-	if [ -x "$QF_NGINX_INIT" ] && ! "$QF_NGINX_INIT" reload >/dev/null 2>&1; then
-		echo "quickfile: nginx rejected the updated configuration, rolling back" >&2
-		if [ -n "$backup" ] && [ -f "$backup" ]; then
-			uci import <"$backup" && uci -q commit nginx 2>/dev/null
-			"$QF_NGINX_INIT" reload >/dev/null 2>&1 ||
-				echo "quickfile: nginx still not reloading, check /etc/config/nginx" >&2
-			echo "quickfile: nginx configuration restored from $backup" >&2
-		else
-			echo "quickfile: no backup available, check /etc/config/nginx manually" >&2
-		fi
-		return 1
+	_qf_reload_nginx "$backup"
+	return $?
+}
+
+# Reload nginx and restore the previous configuration when the new one is
+# rejected. <backup-file> may be empty when the UCI configuration did not
+# change and there is therefore nothing to restore.
+_qf_reload_nginx() {
+	local backup="$1"
+
+	[ -x "$QF_NGINX_INIT" ] || return 0
+	if "$QF_NGINX_INIT" reload >/dev/null 2>&1; then
+		return 0
 	fi
-	return 0
+
+	echo "quickfile: nginx rejected the updated configuration, rolling back" >&2
+	if [ -n "$backup" ] && [ -f "$backup" ]; then
+		uci import <"$backup" && uci -q commit nginx 2>/dev/null
+		"$QF_NGINX_INIT" reload >/dev/null 2>&1 ||
+			echo "quickfile: nginx still not reloading, check /etc/config/nginx" >&2
+		echo "quickfile: nginx configuration restored from $backup" >&2
+	else
+		echo "quickfile: no backup available, check /etc/config/nginx manually" >&2
+	fi
+	return 1
 }
 
 cleanup_nginx_quickfile() {
