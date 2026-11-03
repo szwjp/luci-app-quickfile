@@ -18,7 +18,10 @@ apk add --allow-untrusted luci-app-quickfile-<version>.apk
 apk add --allow-untrusted luci-i18n-quickfile-zh-cn-<version>.apk   # 可选
 ```
 
-安装后进入 **系统 → Quick File Manager**。依赖 `luci-nginx` 与 `quickfile`，即 LuCI 由
+安装后进入 **系统 → Quick File Manager**。后端服务由 `quickfile` 包的 post-install
+自动 enable 并启动（`/etc/init.d/quickfile`），不需要再手动敲 `start`；`luci-app-quickfile`
+的 post-install 会 reload nginx，让 `conf.d/quickfile.locations` 立刻生效。两条安装命令
+执行完即可直接打开页面，无需任何后续手动操作。依赖 `luci-nginx` 与 `quickfile`，即 LuCI 由
 nginx + uwsgi 提供服务。本仓库只提供 apk；仍使用 opkg 的旧系统请按上游 README 的编译
 指南，在自己的 OpenWrt 树里编译上游包。
 
@@ -36,6 +39,9 @@ quickfile 复用 luci-nginx 已有的 LAN 服务器（`nginx._lan`，HTTPS 443�
 - 改完配置后通过 `/etc/init.d/nginx reload` 重新加载；nginx 自己会先跑 `nginx -t`，
   若被拒绝则自动从备份恢复，不会留下坏配置。备份在
   `/root/backup/nginx-uci-<时间戳>.txt`（只保留最近 5 个）。
+  **即使 UCI 配置本来就已经正确，post-install 也会 reload 一次**：包刚装上的
+  `conf.d/quickfile.locations` 只有 reload 才会被运行中的 nginx 读到，不 reload 的话
+  所有请求都会得到 404。
 - 卸载时会把指向本包证书目录的配置交还给 nginx-util（如果有），并删除 1.x 时代遗留的
   `conf.d/quickfile-auth.conf` 与 `/etc/ssl/quickfile/`。
 - 转发头里带上了 `X-Forwarded-Proto`/`X-Forwarded-Port`/`X-Forwarded-Host`：后端据此
