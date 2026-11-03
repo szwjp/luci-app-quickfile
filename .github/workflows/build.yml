@@ -1,0 +1,328 @@
+name: Build
+
+# Manual release build for the single supported architecture (x86_64).
+#
+# Two jobs:
+#   backend - compiles the quickfile backend from the upstream source tarball
+#             pinned in quickfile/Makefile (PKG_SOURCE / PKG_HASH) and hands
+#             the resulting static x86_64 binary over to the package job.
+#   package - builds the apk and ipk packages from that binary and publishes
+#             them as release assets.
+#
+# Everything happens in CI: the toolchain, the Rust build and the packaging.
+# The release version comes from luci-app-quickfile/Makefile
+# (PKG_VERSION/PKG_RELEASE). Triggering the same version again rebuilds it and
+# overwrites the assets of that release.
+on:
+  workflow_dispatch:
+
+# Manual triggers may be fired back to back; queue instead of cancelling so a
+# release is never left half-updated.
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # Pinned tool versions. Everything executed by this workflow is pinned to a
+  # commit or, where it is a script rather than an action, to its SHA-256.
+  #
+  # The Rust toolchain is taken from static.rust-lang.org directly instead of
+  # through rustup: the versioned dist files are immutable and publish their
+  # own SHA-256, so the compiler that builds the backend is reproducible.
+  RUST_VERSION: 1.99.1
+  RUST_TOOLCHAIN_SHA256: 231fcae47ee950621374725b5fc3b5441d2fbda2955ac45dd7dc816d8876cfe7
+  RUST_MUSL_STD_SHA256: 1dd241eaeb19ff3b5180461c77bdee93d6cafc669eda9de834e7c06b0ec3ca95
+  RUST_TARGET: x86_64-unknown-linux-musl
+  APK_TOOLS_REF: b5a31c0d865342ad80be10d68f1bb3d3ad9b0866
+  LUCI_REF: 289a7260434d4b8212a9cc6cf6160cb1935270c1
+
+jobs:
+  backend:
+    name: Compile backend (Rust, musl, static)
+    runs-on: ubuntu-latest
+    outputs:
+      binary-sha256: ${{ steps.build.outputs.binary_sha256 }}
+      rustc-version: ${{ steps.build.outputs.rustc_version }}
+      source-sha256: ${{ steps.meta.outputs.source_sha256 }}
+      source-version: ${{ steps.meta.outputs.source_version }}
+    steps:
+      - name: Checkout source tree
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 1
+
+      # The upstream source tarball to compile is pinned in quickfile/Makefile;
+      # the hash is verified before anything is unpacked.
+      - name: Read pinned upstream source
+        id: meta
+        run: |
+          set -o pipefail
+          PKG_VERSION=$(sed -n 's/^PKG_VERSION:=//p' quickfile/Makefile | head -n1 | tr -d '[:space:]')
+          PKG_SOURCE=$(sed -n 's/^PKG_SOURCE:=//p' quickfile/Makefile | head -n1 | tr -d '[:space:]')
+          PKG_SOURCE_URL=$(sed -n 's/^PKG_SOURCE_URL:=//p' quickfile/Makefile | head -n1 | tr -d '[:space:]')
+          PKG_HASH=$(sed -n 's/^PKG_HASH:=//p' quickfile/Makefile | head -n1 | tr -d '[:space:]')
+          [ -n "$PKG_VERSION" ] && [ -n "$PKG_SOURCE" ] && [ -n "$PKG_SOURCE_URL" ] && [ -n "$PKG_HASH" ]
+          echo "source_version=${PKG_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "source_sha256=${PKG_HASH}" >> "$GITHUB_OUTPUT"
+          echo "source_name=${PKG_SOURCE}" >> "$GITHUB_OUTPUT"
+          echo "source_url=${PKG_SOURCE_URL}" >> "$GITHUB_OUTPUT"
+          echo "::notice::Backend source: ${PKG_SOURCE_URL}/${PKG_SOURCE} (sha256 ${PKG_HASH})"
+
+      - name: Install Rust toolchain
+        run: |
+          set -o pipefail
+          cd /tmp
+          curl -fsSL --retry 3 --max-time 600 -O \
+            "https://static.rust-lang.org/dist/rust-${RUST_VERSION}-x86_64-unknown-linux-gnu.tar.xz"
+          echo "${RUST_TOOLCHAIN_SHA256}  rust-${RUST_VERSION}-x86_64-unknown-linux-gnu.tar.xz" | sha256sum -c -
+          curl -fsSL --retry 3 --max-time 600 -O \
+            "https://static.rust-lang.org/dist/rust-std-${RUST_VERSION}-${RUST_TARGET}.tar.xz"
+          echo "${RUST_MUSL_STD_SHA256}  rust-std-${RUST_VERSION}-${RUST_TARGET}.tar.xz" | sha256sum -c -
+
+          tar xf "rust-${RUST_VERSION}-x86_64-unknown-linux-gnu.tar.xz"
+          tar xf "rust-std-${RUST_VERSION}-${RUST_TARGET}.tar.xz"
+          "./rust-${RUST_VERSION}-x86_64-unknown-linux-gnu/install.sh" \
+            --prefix="$HOME/.rust" --disable-ldconfig
+          # The musl standard library is a separate component; install it into
+          # the same toolchain directory.
+          "./rust-std-${RUST_VERSION}-${RUST_TARGET}/install.sh" \
+            --prefix="$HOME/.rust" --disable-ldconfig
+          echo "$HOME/.rust/bin" >> "$GITHUB_PATH"
+          rustc --version
+          cargo --version
+
+      - name: Download and verify upstream source
+        env:
+          SOURCE_NAME: ${{ steps.meta.outputs.source_name }}
+          SOURCE_URL: ${{ steps.meta.outputs.source_url }}
+          SOURCE_SHA256: ${{ steps.meta.outputs.source_sha256 }}
+        run: |
+          set -o pipefail
+          mkdir -p /tmp/src
+          curl -fsSL --retry 3 --max-time 600 -o "/tmp/src/${SOURCE_NAME}" "${SOURCE_URL}/${SOURCE_NAME}"
+          echo "${SOURCE_SHA256}  /tmp/src/${SOURCE_NAME}" | sha256sum -c -
+          tar xf "/tmp/src/${SOURCE_NAME}" -C /tmp/src
+          ls -d /tmp/src/*/
+
+      # Upstream declares xz2 with default-features = false, which disables
+      # nothing: xz2 has no default features, so lzma-sys is built without its
+      # "static" feature and links the system liblzma. On a musl target that
+      # library does not exist, so the xz decompressor is bundled instead and
+      # the backend ends up statically linked.
+      - name: Bundle the xz decompressor
+        run: |
+          set -o pipefail
+          cd /tmp/src/quickfile-src-*
+          grep -q 'xz2 = { version = "0.1", default-features = false }' Cargo.toml || {
+            echo "::error::upstream Cargo.toml no longer contains the expected xz2 dependency line; review the static build patch"
+            exit 1
+          }
+          sed -i 's|xz2 = { version = "0.1", default-features = false }|xz2 = { version = "0.1", features = ["static"] }|' Cargo.toml
+          grep -q 'xz2 = { version = "0.1", features = \["static"\] }' Cargo.toml || {
+            echo "::error::the xz2 static feature patch did not apply"
+            exit 1
+          }
+          grep -n 'xz2' Cargo.toml
+
+      - name: Build backend
+        run: |
+          set -o pipefail
+          cd /tmp/src/quickfile-src-*
+          cargo build --release --locked --target "${RUST_TARGET}"
+          mkdir -p /tmp/out
+          cp "target/${RUST_TARGET}/release/quickfile" /tmp/out/quickfile
+          strip /tmp/out/quickfile 2>/dev/null || true
+          chmod 0755 /tmp/out/quickfile
+          file /tmp/out/quickfile
+          if readelf -d /tmp/out/quickfile 2>/dev/null | grep -q NEEDED; then
+            echo "::error::the backend binary is dynamically linked; it would not run on OpenWrt"
+            readelf -d /tmp/out/quickfile | grep NEEDED
+            exit 1
+          fi
+          echo "::notice::backend is statically linked"
+          sha256sum /tmp/out/quickfile
+
+      - name: Record build metadata
+        id: build
+        run: |
+          set -o pipefail
+          SHA="$(sha256sum /tmp/out/quickfile | cut -d' ' -f1)"
+          echo "binary_sha256=${SHA}" >> "$GITHUB_OUTPUT"
+          echo "rustc_version=$(rustc --version)" >> "$GITHUB_OUTPUT"
+          echo "$SHA  quickfile" > /tmp/out/quickfile.sha256
+
+      - name: Upload backend binary
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+        with:
+          name: quickfile-backend
+          path: /tmp/out
+          retention-days: 7
+
+  package:
+    name: Build x86_64 packages & publish release
+    needs: backend
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout source tree
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          # Full history: build-pkg.sh derives SOURCE_DATE_EPOCH from the last
+          # commit that changed packaged files, so docs/CI-only commits do not
+          # change the artifacts. Needs the complete history to find it.
+          fetch-depth: 0
+
+      - name: Parse Makefile version
+        id: version
+        run: |
+          set -o pipefail
+          PKG_VERSION=$(sed -n 's/^PKG_VERSION:=//p' luci-app-quickfile/Makefile | head -n1 | tr -d '[:space:]')
+          PKG_RELEASE=$(sed -n 's/^PKG_RELEASE:=//p' luci-app-quickfile/Makefile | head -n1 | tr -d '[:space:]')
+          [ -n "$PKG_VERSION" ] && [ -n "$PKG_RELEASE" ]
+          # apk uses -r<N>; the release tag follows apk.
+          {
+            echo "version=${PKG_VERSION}-r${PKG_RELEASE}"
+            echo "tag=v${PKG_VERSION}-r${PKG_RELEASE}"
+          } >> "$GITHUB_OUTPUT"
+          echo "::notice::Building v${PKG_VERSION}-r${PKG_RELEASE} for x86_64"
+
+      - name: Download backend binary
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: quickfile-backend
+          path: /tmp/backend
+
+      - name: Checkout apk-tools
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          repository: alpinelinux/apk-tools
+          path: apk-tools
+          ref: ${{ env.APK_TOOLS_REF }}
+          fetch-depth: 1
+
+      - name: Checkout po2lmo
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          repository: openwrt/luci
+          path: po2lmo
+          ref: ${{ env.LUCI_REF }}
+          sparse-checkout: modules/luci-base/src
+          fetch-depth: 1
+
+      - name: Install build dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -o pipefail
+          sudo -E apt-get update -qq
+          sudo -E apt-get install -y build-essential curl fakeroot libssl-dev lua5.1 meson ninja-build
+
+          pushd apk-tools
+          meson setup build \
+            -Db_lto=true \
+            -Dcompressed-help=false \
+            -Ddocs=disabled \
+            -Dhelp=enabled \
+            -Dlua_version=5.1 \
+            -Ddefault_library=static \
+            -Durl_backend=wget \
+            -Dzstd=false \
+            -Dpython=disabled \
+            -Dtests=disabled \
+            -Dcrypto_backend=openssl
+          ninja -C build
+          sudo -E meson install -C build --strip
+          popd
+
+          pushd po2lmo/modules/luci-base/src
+          make po2lmo
+          sudo -E install -m0755 -s po2lmo /usr/local/bin/po2lmo
+          popd
+
+      # openwrt/openwrt's ipkg-build is not needed: this repository ships apk
+      # packages only.
+      - name: Build packages (apk)
+        env:
+          QUICKFILE_BACKEND_SHA256: ${{ needs.backend.outputs.binary-sha256 }}
+        run: |
+          set -o pipefail
+          fakeroot bash .github/build-pkg.sh /tmp/backend/quickfile
+
+      # Guards the two classes of packaging bugs that are invisible in a log:
+      # architecture independent packages must carry the apk spelling "noarch"
+      # and the backend must carry "x86_64".
+      - name: Verify package metadata
+        run: |
+          set -o pipefail
+          set -- dist/*.apk
+          [ "$#" -eq 3 ] || { echo "::error::expected 3 apk files, got $#"; exit 1; }
+
+          for pkg in dist/*.apk; do
+            echo "--- $pkg"
+            apk adbdump "$pkg"
+            case "$(basename "$pkg")" in
+              quickfile-*) apk adbdump "$pkg" | grep -q 'x86_64' ;;
+              *) apk adbdump "$pkg" | grep -q 'noarch' ;;
+            esac
+          done
+
+      - name: Prepare release notes
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+          BACKEND_SHA256: ${{ needs.backend.outputs.binary-sha256 }}
+          RUSTC_VERSION: ${{ needs.backend.outputs.rustc-version }}
+          SOURCE_SHA256: ${{ needs.backend.outputs.source-sha256 }}
+          SOURCE_VERSION: ${{ needs.backend.outputs.source-version }}
+        run: |
+          set -o pipefail
+          {
+            echo "x86_64 专用构建，仅提供 apk。其他架构不在本仓库的出包范围内。"
+            echo
+            echo "## 安装（OpenWrt / ImmortalWrt，x86_64）"
+            echo
+            echo '```sh'
+            echo "apk add --allow-untrusted quickfile-${VERSION}.apk"
+            echo "apk add --allow-untrusted luci-app-quickfile-${VERSION}.apk"
+            echo "apk add --allow-untrusted luci-i18n-quickfile-zh-cn-${VERSION}.apk   # 可选"
+            echo '```'
+            echo
+            echo "包未签名，apk 需要 \`--allow-untrusted\`；安装后 LuCI 菜单在 **系统 → Quick File Manager**，"
+            echo "界面通过 luci-nginx 已有的 HTTPS 入口访问，本包不会改动证书、监听端口或 http→https 跳转。"
+            echo
+            echo "## 构建来源"
+            echo
+            echo "| 项 | 值 |"
+            echo "|---|---|"
+            echo "| 上游后端源码 | \`quickfile-src-${SOURCE_VERSION}.tar.xz\` |"
+            echo "| 上游源码 sha256 | \`${SOURCE_SHA256}\` |"
+            echo "| 后端二进制 sha256 | \`${BACKEND_SHA256}\` |"
+            echo "| 编译器 | \`${RUSTC_VERSION}\` (target \`x86_64-unknown-linux-musl\`) |"
+            echo
+            echo "后端由本仓库的 CI 从上游 Apache-2.0 源码工程"
+            echo "（https://git.cooluc.com/sbwml/quickfile）编译，静态链接，"
+            echo "许可证与来源说明随包安装在 \`/usr/share/licenses/quickfile/\`。"
+            echo
+            echo "## SHA-256"
+            echo
+            echo '```'
+            sha256sum dist/*.apk
+            echo '```'
+          } > dist/release-notes.md
+          cat dist/release-notes.md
+
+      - name: Publish release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
+          body_path: dist/release-notes.md
+          files: |
+            dist/*.apk
+          # Re-triggering the same version replaces that release's assets.
+          overwrite_files: true
+          token: ${{ github.token }}

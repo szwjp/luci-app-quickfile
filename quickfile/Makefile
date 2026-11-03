@@ -1,7 +1,8 @@
 #
 # Copyright (C) 2015-2016 OpenWrt.org
+# Copyright (C) 2026 sbwml <admin@cooluc.com>
 #
-# This is free software, licensed under the GNU General Public License v3.
+# This is free software, licensed under the Apache License, Version 2.0.
 #
 
 include $(TOPDIR)/rules.mk
@@ -10,6 +11,14 @@ PKG_NAME:=quickfile
 PKG_VERSION:=2.0.9
 PKG_RELEASE:=1
 
+# Upstream ships the backend as a source tarball (Rust + Axum); there is no
+# prebuilt binary for 2.x. This repository compiles that source in CI (see
+# .github/workflows/build.yml) and packages the result, so the published
+# package always corresponds to the upstream source at the pinned hash.
+#
+# The upstream tarball is verified twice: the hash below is checked by the CI
+# build before the source is unpacked, and the compiled binary's sha256 is
+# recorded in the release notes.
 PKG_SOURCE:=quickfile-src-$(PKG_VERSION).tar.xz
 PKG_SOURCE_URL:=https://r2.cooluc.com/source
 PKG_HASH:=f73204997e3a572f05e303be1cfb7bb82a03bd3a2a5052a9b9d3217a00233f3b
@@ -30,7 +39,10 @@ define Package/quickfile
 	CATEGORY:=Network
 	SUBMENU:=Web Servers/Proxies
 	TITLE:=Quick File Manager
-	DEPENDS:=$(RUST_ARCH_DEPENDS) +liblzma
+	# This repository publishes x86_64 only. liblzma is listed because an
+	# in-tree build (feeds/luci/quickfile) links the system liblzma, while
+	# the CI build bundles it into a static binary.
+	DEPENDS:=+libc +liblzma @TARGET_x86_64
 	URL:=https://git.cooluc.com/sbwml/quickfile
 endef
 

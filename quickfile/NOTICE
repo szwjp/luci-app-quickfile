@@ -1,0 +1,24 @@
+Quick File Manager (quickfile)
+===============================
+
+The backend binary /usr/bin/quickfile is built from the upstream source
+project "quickfile":
+
+  project : https://git.cooluc.com/sbwml/quickfile
+  version : 2.0.9
+  source  : https://r2.cooluc.com/source/quickfile-src-2.0.9.tar.xz
+  sha256  : f73204997e3a572f05e303be1cfb7bb82a03bd3a2a5052a9b9d3217a00233f3b
+
+License: Apache License 2.0 (see LICENSE in this directory).
+
+The binary is compiled by this repository's CI from the upstream source
+tarball at the hash above; it is not a prebuilt upstream artifact. The
+build uses the Rust target x86_64-unknown-linux-musl and bundles the xz
+decompressor (lzma-sys "static" feature), so the resulting binary is
+statically linked and needs no additional shared libraries.
+
+The source tarball's own LICENSE file (Apache-2.0) is shipped verbatim as
+LICENSE next to this notice.
+
+The LuCI frontend (menu entry and the iframe view) is part of the upstream
+project as well and is redistributed unchanged under the same license.
