@@ -76,6 +76,7 @@ trap 'rm -rf "$TEMP_DIR"' EXIT INT TERM
 # by default. The binary's own sha256 is published with the release.
 PACKAGE_PATHS=(
 	.github/build-pkg.sh
+	.github/patches
 	LICENSE
 	quickfile
 	luci-app-quickfile

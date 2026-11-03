@@ -47,7 +47,7 @@ release 说明里会附上上游源码 sha256、后端二进制 sha256 和编译
 
 插件**不开新端口、不碰证书、不改监听**：它直接挂在 LuCI 现有的 nginx `_lan` server 下，与 LuCI 页面共用同一套 TLS。
 
-- **http 和 https 登录都能用。** 后端依次读三种会话 cookie —— `sysauth_http`、`sysauth_https`、`sysauth` —— 与 LuCI 自己的 dispatcher 接受的名单完全一致（见 `/usr/lib/lua/luci/dispatcher.lua`）。所以从 http 还是 https 登录 LuCI，浏览器拿到的会话 cookie 后端都认；也接受 `?session=` / `?ubus_rpc_session=` 查询参数与 `x-session-id` 请求头。
+- **http 和 https 登录都能用。** 后端依次读三种会话 cookie —— `sysauth_http`、`sysauth_https`、`sysauth` —— 与 LuCI 自己的 dispatcher 接受的名单完全一致（见 `/usr/share/ucode/luci/dispatcher.uc`）。所以从 http 还是 https 登录 LuCI，浏览器拿到的会话 cookie 后端都认；也接受 `?session=` / `?ubus_rpc_session=` 查询参数与 `x-session-id` 请求头。浏览器同时带着多个 cookie 时（旧的 `sysauth_http` 没有 `Secure` 属性，会在 https 登录后继续被发送），后端会**逐个校验**而不是只取第一个，避免旧 cookie 盖掉有效会话。
 - **会话有效性由本机 rpcd 判定**（后端调 ubus 的 `ubus_rpc_session`），不依赖 DNS、证书名或反向代理规则，也不会回环请求 LuCI。
 - **协议由你的 nginx 配置决定。** 后端 location 由 `_lan` 的 `conf.d/*.locations` 引入，凡是 include 了这个目录的监听都能访问 API（实测 80 与 443 都通）；LuCI 页面走 http 还是 https、是否 302 跳转，同样由你自己的 http→https 策略决定，本包不改。
 - **必须先登录 LuCI**，否则接口返回 `missing_session` / `invalid_session`。

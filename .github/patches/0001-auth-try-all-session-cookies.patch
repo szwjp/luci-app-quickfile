@@ -1,0 +1,118 @@
+Try every session cookie instead of only the first one
+
+The upstream backend picks the first LuCI session cookie it finds
+("sysauth_http", then "sysauth_https", then "sysauth") and validates only
+that one. A browser can hold a stale "sysauth_http" next to a valid
+"sysauth_https": the http cookie is not Secure, so it survives an https
+login and keeps being sent on every request. The stale cookie then shadows
+the valid session and the backend answers every request with
+invalid_session ("LuCI 登录状态无效或已过期") even though a valid session
+is present.
+
+The patch collects every candidate session id and tries them until rpcd
+accepts one.
+
+--- a/src/auth.rs
++++ b/src/auth.rs
+@@ -218,44 +218,42 @@
+     }
+ 
+     let headers = req.headers();
+-    let mut session_id = String::new();
++    // Collect every candidate session id instead of stopping at the first
++    // cookie that is present. A browser can hold a stale "sysauth_http"
++    // next to a valid "sysauth_https": the http cookie is not Secure, so it
++    // survives an https login and keeps being sent. Validating only the
++    // first cookie that shows up lets the stale one shadow the valid
++    // session, and every request is then rejected as invalid_session.
++    let mut session_ids: Vec<String> = Vec::new();
+     if let Some(raw) = headers.get(header::COOKIE).and_then(|v| v.to_str().ok()) {
+-        for name in ["sysauth_http", "sysauth_https", "sysauth"] {
++        for name in ["sysauth_https", "sysauth_http", "sysauth"] {
+             for part in raw.split(';') {
+                 let part = part.trim();
+                 if let Some(v) = part.strip_prefix(&format!("{name}=")) {
+                     if !v.is_empty() {
+-                        session_id = v.to_string();
+-                        break;
++                        session_ids.push(v.to_string());
+                     }
+                 }
+             }
+-            if !session_id.is_empty() {
+-                break;
+-            }
+         }
+     }
+-    if session_id.is_empty() {
+-        if let Some(q) = req.uri().query() {
+-            for kv in q.split('&') {
+-                if let Some(v) = kv.strip_prefix("session=") {
+-                    session_id = v.to_string();
+-                    break;
+-                }
+-                if let Some(v) = kv.strip_prefix("ubus_rpc_session=") {
+-                    session_id = v.to_string();
+-                    break;
+-                }
++    if let Some(q) = req.uri().query() {
++        for kv in q.split('&') {
++            if let Some(v) = kv.strip_prefix("session=") {
++                session_ids.push(v.to_string());
++                break;
++            }
++            if let Some(v) = kv.strip_prefix("ubus_rpc_session=") {
++                session_ids.push(v.to_string());
++                break;
+             }
+         }
+     }
+-    if session_id.is_empty() {
+-        if let Some(v) = headers.get("x-session-id").and_then(|v| v.to_str().ok()) {
+-            session_id = v.to_string();
+-        }
++    if let Some(v) = headers.get("x-session-id").and_then(|v| v.to_str().ok()) {
++        session_ids.push(v.to_string());
+     }
+ 
+-    if session_id.is_empty() {
++    if session_ids.is_empty() {
+         return Some(write_auth_error(
+             StatusCode::UNAUTHORIZED,
+             "missing_session",
+@@ -263,17 +261,26 @@
+         ));
+     }
+ 
+-    match validate_luci_session(&session_id) {
+-        Err(e) => Some(write_auth_error(
++    // Try every candidate: the first one that rpcd accepts wins.
++    let mut check_error = None;
++    for session_id in &session_ids {
++        match validate_luci_session(session_id) {
++            Ok(true) => return None,
++            Ok(false) => {}
++            Err(e) => check_error = Some(e),
++        }
++    }
++    if let Some(e) = check_error {
++        return Some(write_auth_error(
+             StatusCode::INTERNAL_SERVER_ERROR,
+             "session_check_failed",
+             &format!("Session verification failed: {e}"),
+-        )),
+-        Ok(false) => Some(write_auth_error(
+-            StatusCode::UNAUTHORIZED,
+-            "invalid_session",
+-            "Invalid or expired session token.",
+-        )),
+-        Ok(true) => None,
++        ));
+     }
++
++    Some(write_auth_error(
++        StatusCode::UNAUTHORIZED,
++        "invalid_session",
++        "Invalid or expired session token.",
++    ))
+ }

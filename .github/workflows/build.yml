@@ -144,6 +144,23 @@ jobs:
           fi
           grep -n 'xz2' Cargo.toml
 
+      # The upstream backend stops at the first LuCI session cookie it finds
+      # and validates only that one. A browser that holds a stale
+      # "sysauth_http" next to a valid "sysauth_https" (the http cookie is
+      # not Secure, so it survives an https login and keeps being sent) then
+      # fails every request with invalid_session, even though a valid
+      # session is present. The patch makes the backend try every candidate
+      # session id until rpcd accepts one.
+      - name: Apply the session cookie patch
+        run: |
+          set -euo pipefail
+          cd "${{ steps.download.outputs.src_dir }}"
+          if ! patch --batch --forward -p1 < "$GITHUB_WORKSPACE/.github/patches/0001-auth-try-all-session-cookies.patch"; then
+            echo "::error::the session cookie patch did not apply; upstream src/auth.rs changed and the patch has to be updated"
+            exit 1
+          fi
+          grep -n "session_ids" src/auth.rs
+
       # ring (pulled in by reqwest/rustls), lzma-sys and zstd-sys compile C
       # code, and the cc crate needs a C compiler for the *target*. The Rust
       # musl target ships rust-lld but no C compiler, so provide musl-gcc and
