@@ -71,4 +71,4 @@ uci import < /root/backup/nginx-uci-<时间戳>.txt
 
 - 未提供非 root 的 ACL，菜单只对 root 可见。
 - 后端以 `-dir /` 运行且带命令终端，权限等同 root。来源限制要自己兜底：实测 ImmortalWrt 25.12.1 + nginx-ssl-util 1.7.7-r2 的 nginx 配置里**没有任何 allow/deny**，包自带的 `/etc/nginx/restrict_locally` 也没有被任何配置 include —— 不存在"stock 模板会替你加上它"这回事。请自行配置 nginx 的来源限制，并让防火墙兜底。
-- 验证状态：**x86_64 的 apk 路径已在实机验证通过**（2026-11-03，ImmortalWrt 25.12.1）。流程为：清干净旧版并确认零残留 → 只跑 release 说明里的原始安装命令全新安装（不做任何手动补救，装完即用）→ 卸载（零残留、日志无报错）→ 再装一次仍一次成功。
+- 验证状态：**x86_64 的 apk 路径已在实机验证通过**（2026-11-03，ImmortalWrt 25.12.1）。流程为：清干净旧版并确认零残留 → 只跑 release 说明里的原始安装命令全新安装（不做任何手动补救，装完即用）→ 卸载（零残留、日志无报错）→ 再装一次仍一次成功。**https 登录路径也已实机确认可用**（重启后经 https 登录 LuCI，浏览器同时带着旧的 `sysauth_http` 与新的 `sysauth_https`，文件管理器正常打开）。
