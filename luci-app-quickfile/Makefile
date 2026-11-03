@@ -5,7 +5,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-quickfile
-PKG_VERSION:=2.0.9
+PKG_VERSION:=2026.11.3
 PKG_RELEASE:=1
 
 PKG_MAINTAINER:=sbwml <admin@cooluc.com>
