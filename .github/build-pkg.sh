@@ -238,15 +238,18 @@ cat > "$TEMP_DIR/qf-pre-deinstall" <<'PRERM'
 export root="${IPKG_INSTROOT}"
 export pkgname="quickfile"
 
-[ -n "${IPKG_INSTROOT}" ] || {
-	# Stop the backend first, so nothing is left listening on the socket.
-	[ -x /etc/init.d/quickfile ] && /etc/init.d/quickfile stop >/dev/null 2>&1
+if [ -z "${IPKG_INSTROOT}" ]; then
+	# default_prerm stops the service and removes its rc.d link. It must be
+	# the only one doing it: a second stop finds no procd instance left and
+	# makes the removal log a "service delete (Not found)" error.
+	default_prerm $0 $@
+	# The runtime socket and the nginx location belong to this package. nginx
+	# only drops the location on a reload, so the teardown does both.
 	rm -rf /tmp/run/quickfile
-	# Remove the location and reload nginx, otherwise the running server
-	# keeps proxying to a backend that no longer exists.
 	rm -f /etc/nginx/conf.d/quickfile.locations
 	[ -x /etc/init.d/nginx ] && /etc/init.d/nginx reload >/dev/null 2>&1
-}
+	exit 0
+fi
 default_prerm $0 $@
 exit 0
 PRERM
