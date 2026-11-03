@@ -61,10 +61,16 @@ jobs:
         run: |
           set -o pipefail
           PKG_VERSION=$(sed -n 's/^PKG_VERSION:=//p' quickfile/Makefile | head -n1 | tr -d '[:space:]')
-          PKG_SOURCE=$(sed -n 's/^PKG_SOURCE:=//p' quickfile/Makefile | head -n1 | tr -d '[:space:]')
+          PKG_SOURCE_RAW=$(sed -n 's/^PKG_SOURCE:=//p' quickfile/Makefile | head -n1 | tr -d '[:space:]')
           PKG_SOURCE_URL=$(sed -n 's/^PKG_SOURCE_URL:=//p' quickfile/Makefile | head -n1 | tr -d '[:space:]')
           PKG_HASH=$(sed -n 's/^PKG_HASH:=//p' quickfile/Makefile | head -n1 | tr -d '[:space:]')
-          [ -n "$PKG_VERSION" ] && [ -n "$PKG_SOURCE" ] && [ -n "$PKG_SOURCE_URL" ] && [ -n "$PKG_HASH" ]
+          [ -n "$PKG_VERSION" ] && [ -n "$PKG_SOURCE_RAW" ] && [ -n "$PKG_SOURCE_URL" ] && [ -n "$PKG_HASH" ]
+          # PKG_SOURCE is written with make syntax (quickfile-src-$(PKG_VERSION).tar.xz),
+          # which the shell would not expand; resolve it here.
+          PKG_SOURCE=$(printf '%s' "$PKG_SOURCE_RAW" | sed "s|\$(PKG_VERSION)|$PKG_VERSION|g")
+          case "$PKG_SOURCE" in
+            *'$('*) echo "::error::PKG_SOURCE still contains an unresolved reference: $PKG_SOURCE"; exit 1 ;;
+          esac
           echo "source_version=${PKG_VERSION}" >> "$GITHUB_OUTPUT"
           echo "source_sha256=${PKG_HASH}" >> "$GITHUB_OUTPUT"
           echo "source_name=${PKG_SOURCE}" >> "$GITHUB_OUTPUT"
