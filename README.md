@@ -1,85 +1,72 @@
 # luci-app-quickfile
 
-一款专为 OpenWrt 设计的高性能轻量 Web 文件管理器。后端采用 Rust 构建，前端基于 Vue 3 + Vite + Tailwind CSS。
+OpenWrt 上的轻量级网页端文件管理器。2.x 后端用 Rust(Axum) 构建，前端是 Vue 3 + Vite + Tailwind，随包安装。
 
----
+> 本仓库 fork 自 [sbwml/luci-app-quickfile](https://github.com/sbwml/luci-app-quickfile)，自维护 **CI 构建与出包**。
+>
+> **上游不发布任何 apk/ipk**（仓库里没有 CI、没有 release），官方源（ImmortalWrt / OpenWrt）里也没有这个包。本仓库把上游源码编译成自己的 apk，只发 **x86_64**。
 
-## 界面预览
+## 出包范围与架构
 
-| 浅色模式 | 深色模式 |
-| :---: | :---: |
-| <img src="http://cdn.cooluc.com/quickfile/1.jpg" alt="Light Theme" /> | <img src="http://cdn.cooluc.com/quickfile/2.jpg" alt="Dark Theme" /> |
+- **只发 x86_64**。apk 只接受与系统架构完全一致的架构名，或恰好是 `noarch`；`aarch64`、`arm` 这类写法在真机上不是合法架构，包会被 apk 判定为不可安装。
+- **架构无关包**：`luci-app-quickfile`、`luci-i18n-quickfile-zh-cn` 在 apk 中用 `noarch`。
+- 一次 release 固定 3 个 apk（后端 + 前端 + 可选中文包）。用同一版本再触发一次会重新构建并覆盖该 release 的同名资产。
+- **只出 apk，不出 ipk**。需要 opkg 的旧系统请自行用上游源码在 OpenWrt 树里编译（见上游 README 的编译指南）。
 
----
+## 构建来源与校验
 
-## 主要特性
+后端二进制不是上游的预编译产物，而是**本仓库的 CI 从上游源码编译**的：
 
-- **文件浏览与管理**
-  - 提供列表与网格两种视图，支持按名称、体积、修改时间排序
-  - 文件列表与分页流式加载，首屏响应迅速，滚动平滑加载海量文件
-  - 完整键鼠交互：鼠标框选、多选（`Ctrl` / `Shift`）、全选（`Ctrl+A`）
-  - 目录树侧边栏：懒加载展开、一键折叠全部、跟随隐藏文件开关，选中即跳转
-  - 右键上下文菜单：新建、重命名、权限修改（chmod）、属性查看、复制、剪切、粘贴、压缩与解压
-- **传输与上传**
-  - 支持拖拽移动、拖拽上传文件及文件夹（自动保留目录树层级）
-  - 支持剪贴板粘贴直接上传（`Ctrl+V` 图片与文件）
-  - 上传管理面板：实时进度、速率显示、传输取消及同名覆盖/重命名策略
-  - 远程 URL 离线下载
-- **归档与压缩**
-  - 支持格式：`zip`、`gz`、`tar`、`tar.gz`、`tar.xz`、`tar.zst`、`ipk`、`apk`、`img`、`ext4`、`squashfs`
-  - ZIP 归档支持 WinZip AES-256 加密与解密
-- **多媒体与文档预览**
-  - 图片浏览器：支持平移、无级缩放与前后切换
-  - 媒体播放：内置音频播放器与视频播放器（支持倍速、画中画、全屏）
-  - PDF 阅读器：支持平滑滚动、旋转、分页与全文检索
-- **开发与系统集成**
-  - 内置终端：基于 xterm.js 与 WebSocket，自动定位至当前浏览目录；支持 `Ctrl+滚轮` / `Ctrl+=` / `Ctrl+-` 缩放字号（右下角提示当前字号），`Ctrl+Shift+C` 复制选中内容
-  - 移动端终端快捷键工具栏：`Tab`、`Esc`、`Ctrl` 组合键、粘贴与方向键，兼容虚拟键盘退格与中文输入法组词
-  - 代码编辑器：集成 CodeMirror 6，内置 40+ 语言高亮，主题自动联动，支持快捷键搜索（`Ctrl+F`）与保存（`Ctrl+S`）；`Ctrl+Shift+Z` 重做
-  - OpenWrt 专属语法：内置 `uci`（`config` / `option` / `list` / `package`）高亮，`ucode` 按 JavaScript 高亮与格式化
-  - 一键格式化（右键菜单 / `Shift+Alt+F`）：支持 `JS / TS / JSON / CSS / Less / SCSS / HTML / Vue / Markdown / YAML / shell / Lua`
-  - 文档预览：`.md` 走 GitHub 风格渲染，`.html` 以沙箱 iframe 预览，编辑与预览间切换
-  - 哈希校验：支持在文件属性中直接计算 MD5 与 SHA-256
-- **OpenWrt 系统深度适配**
-  - 支持 OpenWrt 24.10 / 25.12 软件包一键安装
-  - `init.d` 服务管理：支持直接执行 `start`、`stop`、`restart`、`reload`、`enable`、`disable`
-  - 原生 `ipk2apk` 转换：基于 Rust 独立实现 APK v3 (ADB 容器) 格式打包，无需依赖完整 `apk-tools` 即可完成 `.ipk` 至 `.apk` 转换并保留完整元数据
+| 项 | 值 |
+|---|---|
+| 上游源码包 | `https://r2.cooluc.com/source/quickfile-src-<版本>.tar.xz` |
+| 校验 | 包 sha256 钉在 `quickfile/Makefile` 的 `PKG_HASH`，编译前校验 |
+| 编译器 | Rust 1.99.1（版本化 dist 包 + 官方 sha256，CI 里校验） |
+| 目标 | `x86_64-unknown-linux-musl`，静态链接 |
+| 依赖 | 只有一个补丁：把上游 `xz2` 的依赖改成 `features = ["static"]`，把 xz 解压器编进二进制（上游默认链系统 liblzma，在 musl 上跑不起来） |
 
----
+release 说明里会附上上游源码 sha256、后端二进制 sha256 和编译器版本。详见 [构建与跟版](docs/build.md)。
 
-## 编译指南
+## 文档
 
-```bash
-# 克隆源码至 OpenWrt SDK 或源码根目录
-git clone https://github.com/sbwml/luci-app-quickfile package/quickfile
+- [安装与访问方式](docs/install.md) —— apk 安装命令、菜单位置、nginx 集成、以及 https / http 访问的实际行为。
+- [构建、校验与跟版](docs/build.md) —— CI 的两个 job、校验链、工具链钉死方式、上游版本探测与人工跟版步骤。
 
-# 配置并选择包: LuCI -> Applications -> luci-app-quickfile
-make menuconfig
+## 功能
 
-# 编译单独模块
-make package/quickfile/luci-app-quickfile/compile V=s
+- **文件浏览与管理。** 列表与网格两种视图，按名称/体积/修改时间排序，分页流式加载，框选与多选；目录树侧边栏懒加载；右键新建、重命名、chmod、属性、复制、剪切、粘贴、压缩与解压。
+- **传输与上传。** 拖拽移动文件与文件夹（保留目录层级），`Ctrl+V` 剪贴板粘贴上传，上传管理面板（进度、速率、取消、覆盖/重命名策略），远程 URL 下载。
+- **归档与压缩。** 支持 `zip`、`gz`、`tar`、`tar.gz`、`tar.xz`、`tar.zst`、`ipk`、`apk`、`img`、`ext4`、`squashfs`；ZIP 支持 WinZip AES-256 加解密。
+- **多媒体与文档预览。** 图片浏览器（平移/缩放/翻页）、音视频播放器（倍速/画中画/全屏）、PDF 阅读器（滚动/旋转/分页/全文检索）。
+- **终端与编辑器。** 内置 xterm.js 终端（WebSocket，自动定位当前目录）；CodeMirror 6 代码编辑器，40+ 语言高亮，内置 `uci`、`ucode` 语法；右键一键格式化（JS/TS/JSON/CSS/Less/SCSS/HTML/Vue/Markdown/YAML/shell/Lua）；`.md` 走 GitHub 风格渲染，`.html` 以沙箱 iframe 预览。
+- **文件属性与校验。** 查看大小、目录内容、属主属组，计算 MD5/SHA-256。
+- **多语言。** 界面文案由后端内置，按浏览器语言提供简体/繁体中文，其余语言回退英文。本仓库的 `luci-i18n-quickfile-zh-cn` 只翻译 LuCI 菜单项，不含界面文案。
+
+## 鉴权模型
+
+2.x 的后端**直接用本地 ubus 校验 LuCI 会话**（`ubus_rpc_session`），依次读取 `sysauth_http` / `sysauth_https` / `sysauth` 三种 cookie 名，因此：
+
+- 不需要任何 cookie 改写，也不需要额外的回环监听端口；
+- 会话是否有效由 rpcd/ubus 判定，DNS、证书、访问规则都不影响；
+- 必须从已登录的 LuCI 会话访问，且依赖 nginx 反向代理。
+
+## 升级与回滚
+
+- 升级：新版本的 post-install 会确保 nginx 的 `_lan` server 仍 include `conf.d/*.locations`，并在 nginx 拒绝新配置时自动回滚。
+- 手工回滚 nginx 配置：
+
+```sh
+uci import < /root/backup/nginx-uci-<时间戳>.txt
+/etc/init.d/nginx reload
 ```
 
-**⚠** 本项目使用 OpenWrt 原生 Token 验证，Web 服务依赖 `nginx` 反向代理，非开发人员不建议自行编译使用。
+## 许可证
 
----
+- 本仓库的 CI 脚本与文档：Apache License 2.0，见 [LICENSE](LICENSE)。
+- 后端二进制由本仓库的 CI 从上游 Apache-2.0 源码工程（<https://git.cooluc.com/sbwml/quickfile>）编译；许可证与来源说明随包安装到 `/usr/share/licenses/quickfile/`，详见该目录的 `NOTICE`。
 
-## Nginx 配置参考
+## 已知限制
 
-OpenWrt 下 Nginx 默认启用 HTTPS 与自签证书。如需改为标准 HTTP（80 端口）监听，可执行以下 UCI 指令：
-
-```bash
-uci set nginx.global.uci_enable='true'
-uci del nginx._lan
-uci del nginx._redirect2ssl
-uci add nginx server
-uci rename nginx.@server[0]='_lan'
-uci set nginx._lan.server_name='_lan'
-uci add_list nginx._lan.listen='80 default_server'
-uci add_list nginx._lan.listen='[::]:80 default_server'
-uci add_list nginx._lan.include='conf.d/*.locations'
-uci set nginx._lan.access_log='off; # logd openwrt'
-uci commit nginx
-
-service nginx restart
-```
+- 未提供非 root 的 ACL，菜单只对 root 可见。
+- 后端以 `-dir /` 运行且带命令终端，权限等同 root。请自行确认 `_lan` 仍然限制来源网段：stock 模板会在 `_lan` 的 include 里放 `restrict_locally`（只允许回环与私网地址），本包不会改动它，但如果你手工删过这个 include，`443` 上就是全放开。
+- 验证状态：**apk 路径（x86_64）待实机验证**——CI 已能产出 3 个 apk，但本仓库的这套 2.x 包尚未在真机上做过全新安装实测（1.0.25 时代的包曾实测通过，2.x 的鉴权模型完全不同，需要重新验证）。
