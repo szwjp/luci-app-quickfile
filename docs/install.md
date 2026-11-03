@@ -70,7 +70,11 @@ quickfile 复用 luci-nginx 已有的 LAN 服务器（`nginx._lan`，HTTPS 443�
 |---|---|
 | `https://<lan-ip>/cgi-bin/luci/quickfile` | **完整可用**（证书告警取决于你自己的证书，见下） |
 | 通过 `_lan` 证书覆盖的域名（如 ACME 域名）访问 | **完整可用**（需该域名在内网能解析到路由器） |
-| `http://<lan-ip>/cgi-bin/luci/quickfile` | 301/302 跳转到 https（stock 行为，本包不改） |
+| `http://<lan-ip>/cgi-bin/luci/quickfile` | 取决于你的 http→https 策略，本包不改：`_redirect2ssl` 带 `return` 规则时 301/302 跳到 https；该 server 没配 `return`（实测机就是这种）时，http 直接可用 |
+
+`http` 与 `https` **两种登录方式都支持**：后端读 `sysauth_http` / `sysauth_https` / `sysauth`
+三种会话 cookie，与 LuCI 自己的 dispatcher 接受的名单一致，从哪个协议登录 LuCI 拿到的
+会话后端都认。
 
 证书由你现有的 nginx 配置决定，本包**完全不碰**：用 nginx-util 自签证书时按 IP 访问会
 有证书告警（自签证书没有 IP SAN），用自己的 ACME 证书时按域名访问不会有告警，按 IP 访问

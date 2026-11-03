@@ -12,6 +12,7 @@ OpenWrt 上的轻量级网页端文件管理器。2.x 后端用 Rust(Axum) 构�
 - **架构无关包**：`luci-app-quickfile`、`luci-i18n-quickfile-zh-cn` 在 apk 中用 `noarch`。
 - 一次 release 固定 3 个 apk（后端 + 前端 + 可选中文包）。用同一版本再触发一次会重新构建并覆盖该 release 的同名资产。
 - **只出 apk，不出 ipk**。需要 opkg 的旧系统请自行用上游源码在 OpenWrt 树里编译（见上游 README 的编译指南）。
+- 包**未签名**，安装需要 `apk add --allow-untrusted`。
 
 ## 构建来源与校验
 
@@ -29,30 +30,31 @@ release 说明里会附上上游源码 sha256、后端二进制 sha256 和编译
 
 ## 文档
 
-- [安装与访问方式](docs/install.md) —— apk 安装命令、菜单位置、nginx 集成、以及 https / http 访问的实际行为。
+- [安装与访问方式](docs/install.md) —— apk 安装命令、菜单位置、nginx 集成、以及 http / https 访问与登录的实际行为。
 - [构建、校验与跟版](docs/build.md) —— CI 的两个 job、校验链、工具链钉死方式、上游版本探测与人工跟版步骤。
 
 ## 功能
 
-- **文件浏览与管理。** 列表与网格两种视图，按名称/体积/修改时间排序，分页流式加载，框选与多选；目录树侧边栏懒加载；右键新建、重命名、chmod、属性、复制、剪切、粘贴、压缩与解压。
+- **文件浏览与管理。** 列表 / 网格双视图，按名称、体积、修改时间排序，分页流式加载，框选与多选；目录树侧边栏懒加载；右键新建、重命名、chmod、属性、复制、剪切、粘贴、压缩与解压。
 - **传输与上传。** 拖拽移动文件与文件夹（保留目录层级），`Ctrl+V` 剪贴板粘贴上传，上传管理面板（进度、速率、取消、覆盖/重命名策略），远程 URL 下载。
 - **归档与压缩。** 支持 `zip`、`gz`、`tar`、`tar.gz`、`tar.xz`、`tar.zst`、`ipk`、`apk`、`img`、`ext4`、`squashfs`；ZIP 支持 WinZip AES-256 加解密。
 - **多媒体与文档预览。** 图片浏览器（平移/缩放/翻页）、音视频播放器（倍速/画中画/全屏）、PDF 阅读器（滚动/旋转/分页/全文检索）。
-- **终端与编辑器。** 内置 xterm.js 终端（WebSocket，自动定位当前目录）；CodeMirror 6 代码编辑器，40+ 语言高亮，内置 `uci`、`ucode` 语法；右键一键格式化（JS/TS/JSON/CSS/Less/SCSS/HTML/Vue/Markdown/YAML/shell/Lua）；`.md` 走 GitHub 风格渲染，`.html` 以沙箱 iframe 预览。
+- **终端与编辑器。** 内置 xterm.js 终端（WebSocket，自动定位当前目录）；CodeMirror 6 编辑器，多语言高亮（C 系、脚本语言、配置与标记语言），内置 `uci`、`ucode` 语法；右键一键格式化（JS/TS/JSON/CSS/Less/SCSS/HTML/Vue/Markdown/YAML/shell/Lua）；`.md` 按 GitHub 风格渲染，`.html` 以沙箱 iframe 预览。
 - **文件属性与校验。** 查看大小、目录内容、属主属组，计算 MD5/SHA-256。
-- **多语言。** 界面文案由后端内置，按浏览器语言提供简体/繁体中文，其余语言回退英文。本仓库的 `luci-i18n-quickfile-zh-cn` 只翻译 LuCI 菜单项，不含界面文案。
+- **多语言。** 界面文案由后端内置，按浏览器语言提供简体/繁体中文，其余回退英文。本仓库的 `luci-i18n-quickfile-zh-cn` 只翻译 LuCI 菜单项，不含界面文案。
 
-## 鉴权模型
+## 访问与登录：http 与 https 都支持
 
-2.x 的后端**直接用本地 ubus 校验 LuCI 会话**（`ubus_rpc_session`），依次读取 `sysauth_http` / `sysauth_https` / `sysauth` 三种 cookie 名，因此：
+插件**不开新端口、不碰证书、不改监听**：它直接挂在 LuCI 现有的 nginx `_lan` server 下，与 LuCI 页面共用同一套 TLS。
 
-- 不需要任何 cookie 改写，也不需要额外的回环监听端口；
-- 会话是否有效由 rpcd/ubus 判定，DNS、证书、访问规则都不影响；
-- 必须从已登录的 LuCI 会话访问，且依赖 nginx 反向代理。
+- **http 和 https 登录都能用。** 后端依次读三种会话 cookie —— `sysauth_http`、`sysauth_https`、`sysauth` —— 与 LuCI 自己的 dispatcher 接受的名单完全一致（见 `/usr/lib/lua/luci/dispatcher.lua`）。所以从 http 还是 https 登录 LuCI，浏览器拿到的会话 cookie 后端都认；也接受 `?session=` / `?ubus_rpc_session=` 查询参数与 `x-session-id` 请求头。
+- **会话有效性由本机 rpcd 判定**（后端调 ubus 的 `ubus_rpc_session`），不依赖 DNS、证书名或反向代理规则，也不会回环请求 LuCI。
+- **协议由你的 nginx 配置决定。** 后端 location 由 `_lan` 的 `conf.d/*.locations` 引入，凡是 include 了这个目录的监听都能访问 API（实测 80 与 443 都通）；LuCI 页面走 http 还是 https、是否 302 跳转，同样由你自己的 http→https 策略决定，本包不改。
+- **必须先登录 LuCI**，否则接口返回 `missing_session` / `invalid_session`。
 
 ## 升级与回滚
 
-- 升级：新版本的 post-install 会确保 nginx 的 `_lan` server 仍 include `conf.d/*.locations`，并在 nginx 拒绝新配置时自动回滚。
+- 升级：新版本的 post-install 会确保 nginx 的 `_lan` server 仍 include `conf.d/*.locations`，并**无条件 reload nginx** —— 即使配置本来就没变也要 reload，否则新装的 location 文件不会被运行中的 nginx 读到（表现为接口全部 404）。nginx 拒绝新配置时自动回滚。
 - 手工回滚 nginx 配置：
 
 ```sh
@@ -68,5 +70,5 @@ uci import < /root/backup/nginx-uci-<时间戳>.txt
 ## 已知限制
 
 - 未提供非 root 的 ACL，菜单只对 root 可见。
-- 后端以 `-dir /` 运行且带命令终端，权限等同 root。请自行确认 `_lan` 仍然限制来源网段：stock 模板会在 `_lan` 的 include 里放 `restrict_locally`（只允许回环与私网地址），本包不会改动它，但如果你手工删过这个 include，`443` 上就是全放开。
-- 验证状态：**apk 路径（x86_64）待实机验证**——CI 已能产出 3 个 apk，但本仓库的这套 2.x 包尚未在真机上做过全新安装实测（1.0.25 时代的包曾实测通过，2.x 的鉴权模型完全不同，需要重新验证）。
+- 后端以 `-dir /` 运行且带命令终端，权限等同 root。来源限制要自己兜底：实测 ImmortalWrt 25.12.1 + nginx-ssl-util 1.7.7-r2 的 nginx 配置里**没有任何 allow/deny**，包自带的 `/etc/nginx/restrict_locally` 也没有被任何配置 include —— 不存在"stock 模板会替你加上它"这回事。请自行配置 nginx 的来源限制，并让防火墙兜底。
+- 验证状态：**x86_64 的 apk 路径已在实机验证通过**（2026-11-03，ImmortalWrt 25.12.1）。流程为：清干净旧版并确认零残留 → 只跑 release 说明里的原始安装命令全新安装（不做任何手动补救，装完即用）→ 卸载（零残留、日志无报错）→ 再装一次仍一次成功。
