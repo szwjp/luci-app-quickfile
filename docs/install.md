@@ -38,6 +38,11 @@ quickfile 复用 luci-nginx 已有的 LAN 服务器（`nginx._lan`，HTTPS 443�
   `/root/backup/nginx-uci-<时间戳>.txt`（只保留最近 5 个）。
 - 卸载时会把指向本包证书目录的配置交还给 nginx-util（如果有），并删除 1.x 时代遗留的
   `conf.d/quickfile-auth.conf` 与 `/etc/ssl/quickfile/`。
+- 转发头里带上了 `X-Forwarded-Proto`/`X-Forwarded-Port`/`X-Forwarded-Host`：后端据此
+  判断当前是不是 https（决定它自己的 cookie 要不要加 `Secure`），默认的 LuCI 会话
+  模式下用不到，但启用后端自带账号时需要。
+- `assets/` 目录（前端构建产物，文件名带内容哈希）单独设了 30 天长缓存，二次进入页面
+  不用重新下载整个前端。
 
 ## 鉴权：后端直接用 ubus 校验会话
 

@@ -6,7 +6,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-quickfile
 PKG_VERSION:=2.0.9
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 
 PKG_MAINTAINER:=sbwml <admin@cooluc.com>
 PKG_LICENSE:=Apache-2.0
@@ -22,8 +22,8 @@ include $(TOPDIR)/feeds/luci/luci.mk
 # Package description — referenced by LuCI buildroot
 define Package/luci-app-quickfile/description
 	LuCI support for the Quickfile web-based file manager.
-	Provides the /cgi-bin/luci/admin/services/quickfile page and
-	integration with the lightweight quickfile HTTP backend.
+	Provides the /cgi-bin/luci/admin/system/quickfile page, which embeds the
+	backend that is served through the LuCI https endpoint.
 endef
 
 # call BuildPackage - OpenWrt buildroot signature

@@ -4,3 +4,7 @@ msgstr "Content-Type: text/plain; charset=UTF-8"
 #: luci-app-quickfile/root/usr/share/luci/menu.d/luci-app-quickfile.json:3
 msgid "Quick File Manager"
 msgstr ""
+
+#: luci-app-quickfile/htdocs/luci-static/resources/view/system/quickfile.js:35
+msgid "Loading the file manager…"
+msgstr ""

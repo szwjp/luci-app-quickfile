@@ -1,45 +1,91 @@
+# quickfile behind the LuCI https endpoint.
+#
+# The backend listens on a unix socket and is reached through the LAN server
+# of luci-nginx, so the file manager shares the origin (and the certificate)
+# of the LuCI web interface: no extra port, no mixed content, and the
+# terminal WebSocket stays on the same origin as the page.
+#
+# The request body is passed straight through (proxy_request_buffering off),
+# so a large upload is not written to disk first. client_max_body_size 0
+# lifts the limit for these locations only; the rest of the web interface
+# keeps the 128M limit from uci.conf.template. Should the buffering be
+# switched back on, nginx would write the body to client_body_temp_path,
+# which is /var/lib/nginx/body on the root filesystem.
+
 client_max_body_size 0;
 client_body_buffer_size 128k;
 
 location /cgi-bin/luci/quickfile {
-		proxy_cache off;
-		proxy_redirect off;
-		proxy_buffering off;
-		proxy_request_buffering off;
-		proxy_http_version 1.1;
-		proxy_connect_timeout 300;
-		proxy_read_timeout 300;
-		proxy_send_timeout 300;
-		proxy_set_header Host $host;
-		proxy_set_header Upgrade $http_upgrade;
-		proxy_set_header Connection "upgrade";
-		proxy_set_header X-Real-IP $remote_addr;
-		proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-		proxy_pass http://unix:/tmp/run/quickfile/quickfile.sock;
+	proxy_cache off;
+	proxy_redirect off;
+	proxy_buffering off;
+	proxy_request_buffering off;
+	proxy_http_version 1.1;
+	proxy_connect_timeout 300;
+	proxy_read_timeout 300;
+	proxy_send_timeout 300;
+	proxy_set_header Host $host;
+	proxy_set_header Upgrade $http_upgrade;
+	proxy_set_header Connection "upgrade";
+	proxy_set_header X-Real-IP $remote_addr;
+	proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+	proxy_set_header X-Forwarded-Proto $scheme;
+	proxy_set_header X-Forwarded-Port $server_port;
+	proxy_set_header X-Forwarded-Host $host;
+	proxy_pass http://unix:/tmp/run/quickfile/quickfile.sock;
 }
 
 location /cgi-bin/luci/quickfile/api/ {
-		proxy_cache off;
-		proxy_redirect off;
-		proxy_buffering off;
-		proxy_request_buffering off;
-		proxy_http_version 1.1;
-		proxy_connect_timeout 300;
-		proxy_read_timeout 300;
-		proxy_send_timeout 300;
-		proxy_set_header Host $host;
-		proxy_set_header Upgrade $http_upgrade;
-		proxy_set_header Connection "upgrade";
-		proxy_set_header X-Real-IP $remote_addr;
-		proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-		rewrite ^/cgi-bin/luci/quickfile/api/(.*) /api/$1 break;
-		proxy_pass http://unix:/tmp/run/quickfile/quickfile.sock;
+	proxy_cache off;
+	proxy_redirect off;
+	proxy_buffering off;
+	proxy_request_buffering off;
+	proxy_http_version 1.1;
+	proxy_connect_timeout 300;
+	proxy_read_timeout 300;
+	proxy_send_timeout 300;
+	proxy_set_header Host $host;
+	proxy_set_header Upgrade $http_upgrade;
+	proxy_set_header Connection "upgrade";
+	proxy_set_header X-Real-IP $remote_addr;
+	proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+	proxy_set_header X-Forwarded-Proto $scheme;
+	proxy_set_header X-Forwarded-Port $server_port;
+	proxy_set_header X-Forwarded-Host $host;
+	rewrite ^/cgi-bin/luci/quickfile/api/(.*) /api/$1 break;
+	proxy_pass http://unix:/tmp/run/quickfile/quickfile.sock;
 }
 
 location /cgi-bin/luci/quickfile-static/ {
-		proxy_set_header Host $host;
-		proxy_set_header X-Real-IP $remote_addr;
-		proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-		rewrite ^/cgi-bin/luci/quickfile-static/(.*) /static/$1 break;
-		proxy_pass http://unix:/tmp/run/quickfile/quickfile.sock;
+	proxy_set_header Host $host;
+	proxy_set_header X-Real-IP $remote_addr;
+	proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+	proxy_set_header X-Forwarded-Proto $scheme;
+	proxy_set_header X-Forwarded-Port $server_port;
+	proxy_set_header X-Forwarded-Host $host;
+	rewrite ^/cgi-bin/luci/quickfile-static/(.*) /static/$1 break;
+	proxy_pass http://unix:/tmp/run/quickfile/quickfile.sock;
+}
+
+# The asset file names carry a content hash, so they can be cached for as
+# long as the browser likes. The images and the logo keep the short cache
+# of the location above, because their names do not change with content.
+location /cgi-bin/luci/quickfile-static/assets/ {
+	proxy_cache off;
+	proxy_redirect off;
+	proxy_buffering off;
+	proxy_http_version 1.1;
+	proxy_connect_timeout 300;
+	proxy_read_timeout 300;
+	proxy_send_timeout 300;
+	proxy_set_header Host $host;
+	proxy_set_header X-Real-IP $remote_addr;
+	proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+	proxy_set_header X-Forwarded-Proto $scheme;
+	proxy_set_header X-Forwarded-Port $server_port;
+	proxy_set_header X-Forwarded-Host $host;
+	rewrite ^/cgi-bin/luci/quickfile-static/(.*) /static/$1 break;
+	proxy_pass http://unix:/tmp/run/quickfile/quickfile.sock;
+	expires 30d;
+	add_header Cache-Control "public, immutable";
 }

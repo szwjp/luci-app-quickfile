@@ -9,7 +9,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=quickfile
 PKG_VERSION:=2.0.9
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 
 # Upstream ships the backend as a source tarball (Rust + Axum); there is no
 # prebuilt binary for 2.x. This repository compiles that source in CI (see
